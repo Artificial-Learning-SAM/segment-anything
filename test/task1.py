@@ -1,4 +1,5 @@
 import os
+import argparse
 import sys
 sys.path.append("..")
 
@@ -7,6 +8,17 @@ import nibabel as nib
 import cv2
 
 from segment_anything import sam_model_registry, SamPredictor
+
+parser = argparse.ArgumentParser(description='Task 1')
+parser.add_argument('-n', '--number', type=int,
+                    help='Number of points to sample from mask')
+parser.add_argument('-c', '--center',
+                    help='Use center (max distance to boundary) of mask as the first prompt',
+                    action='store_true')
+parser.add_argument('-b', '--bbox',
+                    help='Use bounding box of mask as prompt',
+                    action='store_true')
+args = parser.parse_args()
 
 print("Imports done")
 
@@ -28,6 +40,38 @@ train_list.sort()
 label_list.sort()
 print("Samples loaded")
 
+# Helper functions
+
+# Get points from mask
+def GetPointsFromMask(mask, number):
+    input_point = []
+    input_label = []
+
+    # If center flag is set, get center of mask
+    if args.center:
+        dist_img = cv2.distanceTransform(mask.astype(np.uint8), cv2.DIST_L2, 5)
+        x, y = np.unravel_index(dist_img.argmax(), dist_img.shape)
+        input_point.append([y, x])
+        input_label.append(1)
+        number -= 1
+
+    candidates = np.where(mask)
+    for i in range(number):
+        _ = np.random.randint(0, candidates[0].size)
+        x = candidates[0][_]
+        y = candidates[1][_]
+        input_point.append([y, x])
+        input_label.append(1)
+
+    return np.array(input_point), np.array(input_label)
+
+# Get bounding box in xyxy format from mask
+def GetBBoxFromMask(mask):
+    m = mask.nonzero()
+    return np.array([m[1].min(), m[0].min(), m[1].max(), m[0].max()])
+
+
+np.random.seed(0)
 dices = np.zeros(13, dtype=np.float32)
 times = np.zeros(13, dtype=np.float32)
 
@@ -41,24 +85,31 @@ for i in range(len(train_list)):
         img = img_3d[:,:,j]
         img = (img / img.max() * 255).astype(np.uint8)
         label = label_3d[:,:,j]
+        if label.max() == 0:
+            continue
         predictor.set_image(cv2.cvtColor(img, cv2.COLOR_GRAY2RGB))
         # cv2.imwrite(f"sample_{i+1}_slice_{j}_img.png", img)
 
         # Iterate through all organs
         for k in range(1, 14):
-            mask = np.where(label == k)
-            if mask[0].size != 0:
-                _ = np.random.randint(0, mask[0].size)
-                x = mask[0][_]
-                y = mask[1][_]
-                input_point = np.array([[y, x]])
-                input_label = np.array([1])
+            mask = label == k
+            if mask.max() != 0:
+                if args.number: # Use points as prompt
+                    input_point, input_label = GetPointsFromMask(mask, args.number)
+                    masks, _, _ = predictor.predict(
+                        point_coords=input_point,
+                        point_labels=input_label,
+                        multimask_output=False,
+                    )
+                elif args.bbox: # Use bounding box as prompt
+                    bbox = GetBBoxFromMask(mask)
+                    masks, _, _ = predictor.predict(
+                        point_coords=None,
+                        point_labels=None,
+                        box=bbox[None, :],
+                        multimask_output=False,
+                    )
 
-                masks, scores, logits = predictor.predict(
-                    point_coords=input_point,
-                    point_labels=input_label,
-                    multimask_output=False,
-                )
 
                 dice = 2 * np.sum(masks[0] * (label == k)) / (np.sum(masks[0]) + np.sum((label == k)))
                 print(f"Sample {i+1}, Slice {j}, Organ {k}, Dice {dice}")
