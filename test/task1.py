@@ -32,11 +32,11 @@ predictor = SamPredictor(sam)
 print("SAM initialized")
 
 # Get list of samples
-train_path = 'BTCV/imagesTr'
-label_path = 'BTCV/labelsTr'
-train_list = os.listdir(train_path)
+test_path = 'BTCV/imagesTest'
+label_path = 'BTCV/labelsTest'
+test_list = os.listdir(test_path)
 label_list = os.listdir(label_path)
-train_list.sort()
+test_list.sort()
 label_list.sort()
 print("Samples loaded")
 
@@ -75,9 +75,9 @@ np.random.seed(0)
 dices = np.zeros(13, dtype=np.float32)
 times = np.zeros(13, dtype=np.float32)
 
-# Iterate through all 30 samples
-for i in range(len(train_list)):
-    img_3d = nib.load(os.path.join(train_path, train_list[i])).get_fdata()
+# Iterate through all 6 test samples
+for i in range(len(test_list)):
+    img_3d = nib.load(os.path.join(test_path, test_list[i])).get_fdata()
     label_3d = nib.load(os.path.join(label_path, label_list[i])).get_fdata()
 
     # Iterate through all slices
@@ -128,5 +128,6 @@ for i in range(len(train_list)):
     # break
 
 dices /= times
-print(dices)
-print(np.mean(dices))
+print('dices:', dices)
+print('times:', times)
+print('average:', np.mean(dices))
