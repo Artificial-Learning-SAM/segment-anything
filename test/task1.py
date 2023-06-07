@@ -6,6 +6,7 @@ sys.path.append("..")
 import numpy as np
 import nibabel as nib
 import cv2
+import matplotlib as mpl
 
 from segment_anything import sam_model_registry, SamPredictor
 
@@ -82,13 +83,21 @@ for i in range(len(test_list)):
 
     # Iterate through all slices
     for j in range(img_3d.shape[2]):
-        img = img_3d[:,:,j]
-        img = (img / img.max() * 255).astype(np.uint8)
         label = label_3d[:,:,j]
         if label.max() == 0:
             continue
-        predictor.set_image(cv2.cvtColor(img, cv2.COLOR_GRAY2RGB))
+        img = img_3d[:,:,j].copy()
+        img -= img.min()
+        img /= img.max()
+
+        img = cv2.cvtColor((img * 255).astype(np.uint8), cv2.COLOR_GRAY2RGB)
+        # colormap = mpl.colormaps['viridis']
+        # colormap = mpl.colormaps['plasma']
+        # img = (colormap(img)[:, :, :3] * 255).astype(np.uint8)
+        # img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
         # cv2.imwrite(f"sample_{i+1}_slice_{j}_img.png", img)
+        predictor.set_image(img)
 
         # Iterate through all organs
         for k in range(1, 14):
