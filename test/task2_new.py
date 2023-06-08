@@ -80,6 +80,7 @@ from statistics import mean
 from torch.nn.functional import threshold, normalize
 from tqdm import tqdm
 import torchvision.transforms as tfs
+from segment_anything.utils.transforms import ResizeLongestSide
 from utils import *
 
 print('Start training')
@@ -88,8 +89,8 @@ lr = 1e-5
 wd = 0
 # 使用自适应的学习率
 optimizer = torch.optim.AdamW(sam.mask_decoder.parameters(), lr=lr, weight_decay=wd)
-# loss_fn = torch.nn.MSELoss()
-loss_fn = my_dice_loss
+loss_fn = torch.nn.MSELoss()
+# loss_fn = my_dice_loss
 # data augmentation
 my_transform = tfs.Compose([
             tfs.RandomHorizontalFlip(p=0.5), 
@@ -126,21 +127,25 @@ for epoch in range(epoch_num):
             img -= img.min()
             img /= img.max()
 
+            
+
             img = cv2.cvtColor((img * 255).astype(np.uint8), cv2.COLOR_GRAY2RGB)
-            input_image_torch = torch.as_tensor(img, device=device).permute(2, 0, 1).contiguous()
+            transform = ResizeLongestSide(sam.image_encoder.img_size) # ResizeLongestSide是一个自定义的变换类，作用是将图像调整为具有指定最长边长度的目标大小。
+            transformed_image = transform.apply_image(img)  # 变换图像大小
+            
+            transformed_image = torch.as_tensor(transformed_image, device=device).permute(2, 0, 1).contiguous()
             # print(input_image_torch.size())
             
             # data_augmentation
             # input_image_torch = my_transform(input_image_torch)
 
-            transformed_image = input_image_torch[None, :, :, :]#将图像转换成模型需要的格式
+            transformed_image = transformed_image[None, :, :, :]#将图像转换成模型需要的格式
             input_image = sam.preprocess(transformed_image) # 问题:这个preprocess是干嘛的？
             # show_img(input_image, f'./test_img/test_preprocess.png')
             # print(input_image.size())
-            # assert 1==0
 
             input_size = input_image.shape[-2:] # 1024 1024
-            original_image_size = transformed_image.shape[-2:] # 512 512
+            original_image_size = img.shape[:2] # 512 512
 
             with torch.no_grad():
                 # encode
@@ -181,7 +186,7 @@ for epoch in range(epoch_num):
                         dense_prompt_embeddings=dense_embeddings,
                         multimask_output=False,
                     )
-                    low_res_masks = low_res_masks[..., : 128, : 128]
+                    # low_res_masks = low_res_masks[..., : 128, : 128]
 
                     upscaled_masks = sam.postprocess_masks(low_res_masks, input_size, original_image_size).to(device)
                     binary_mask = normalize(threshold(upscaled_masks, 0.0, 0))
@@ -203,7 +208,7 @@ for epoch in range(epoch_num):
 
     print(f'Epoch:{epoch}')
     print(f'loss: {mean(epoch_loss)}')
-    print(f'epoch_dice: {epoch_dice}')
+    # print(f'epoch_dice: {epoch_dice}')
     for k in range(1, 14):
         epoch_dice[k] = mean(epoch_dice[k])
     print(f'dice: {epoch_dice}')
