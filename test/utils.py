@@ -7,6 +7,23 @@ def my_dice_loss(pred_mask, gt_mask):
     loss = 1 - dice
     return loss
 
+def plot_curve(losses, dices):
+
+    plt.figure(figsize=(5,5))
+    plt.plot(list(range(len(losses))), losses)
+    plt.title('Mean epoch loss')
+    plt.xlabel('Epoch Number')
+    plt.ylabel('Loss')
+    plt.savefig('loss.png')
+
+    plt.figure(figsize=(5,5))
+    plt.plot(list(range(len(dices))), dices)
+    plt.title('Mean epoch dice')
+    plt.xlabel('Epoch Number')
+    plt.ylabel('Dice')
+    plt.savefig('dice.png')
+    
+
 def show_mask(pred_mask, gt_mask, input_point, k):
     pred = pred_mask.detach().cpu().numpy()
     gt = gt_mask.detach().cpu().numpy()
@@ -31,4 +48,43 @@ def show_mask(pred_mask, gt_mask, input_point, k):
     plt.title('gt')
     plt.imshow(gt.reshape(512,512))
 
-    plt.savefig(f'test{k}.png')
+    plt.savefig(f'./test_img/test{k}.png')
+
+def show_mask_lrum(low_res, upscaled_masks, k):
+    um = upscaled_masks.detach().cpu().numpy()
+    um = um.reshape((512, 512))
+    lr = low_res.detach().cpu().numpy()
+    lr = lr.reshape((256,256))
+
+    plt.figure(figsize=(20,20))
+
+    # plt.subplot(1,2,1)
+    plt.title('lr')
+    plt.imshow(lr)
+    
+    plt.subplot(1,2,2)
+    plt.title('um')
+    plt.imshow(um)
+
+    plt.savefig(f'./test_img/test_lrum{k}.png')
+
+def show_img(input_img, title, T = True):
+    img = input_img.detach().cpu().numpy()
+    img = img.reshape(img.shape[1], img.shape[2], -1)
+    if T:
+        img = img.T
+
+    plt.figure(figsize=(20,20))
+
+    # plt.subplot(1,2,1)
+    plt.title('img')
+    plt.imshow(img)
+    
+
+    # plt.subplot(1,2,2)
+    # plt.title('um')
+    # plt.imshow(um)
+
+    plt.savefig(title)
+
+    
