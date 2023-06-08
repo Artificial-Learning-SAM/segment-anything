@@ -20,6 +20,9 @@ parser.add_argument('-c', '--center',
 parser.add_argument('-b', '--bbox',
                     help='Use bounding box of mask as prompt',
                     action='store_true')
+parser.add_argument('-e', '--epoch',
+                    help='Number of training epoch',
+                    default=100)
 args = parser.parse_args()
 
 print("Imports done")
@@ -85,7 +88,7 @@ lr = 1e-5
 wd = 0
 # 使用自适应的学习率
 optimizer = torch.optim.AdamW(sam.mask_decoder.parameters(), lr=lr, weight_decay=wd)
-loss_fn = torch.nn.MSELoss()
+# loss_fn = torch.nn.MSELoss()
 loss_fn = my_dice_loss
 # data augmentation
 my_transform = tfs.Compose([
@@ -96,7 +99,10 @@ my_transform = tfs.Compose([
 np.random.seed(0)
 dices = np.zeros(13, dtype=np.float32)
 times = np.zeros(13, dtype=np.float32)
-epoch_num = 100
+epoch_num = args.epoch
+
+losses = []
+dices = []
 
 for epoch in range(epoch_num):
     epoch_loss = []
@@ -109,10 +115,10 @@ for epoch in range(epoch_num):
         label_3d = nib.load(os.path.join(label_path, label_list[i])).get_fdata()
 
         # Iterate through all slices
-        # for j in tqdm(range(img_3d.shape[2])):
+        for j in tqdm(range(img_3d.shape[2])):
         # 只取中间的切片试试
-        mid = int(img_3d.shape[2] / 2)
-        for j in tqdm(range(mid, mid+2)):
+        # mid = int(img_3d.shape[2] / 2)
+        # for j in tqdm(range(mid, mid+2)):
             label = label_3d[:,:,j]
             if label.max() == 0:
                 continue
@@ -122,9 +128,16 @@ for epoch in range(epoch_num):
 
             img = cv2.cvtColor((img * 255).astype(np.uint8), cv2.COLOR_GRAY2RGB)
             input_image_torch = torch.as_tensor(img, device=device).permute(2, 0, 1).contiguous()
+            # print(input_image_torch.size())
+            
+            # data_augmentation
             # input_image_torch = my_transform(input_image_torch)
+
             transformed_image = input_image_torch[None, :, :, :]#将图像转换成模型需要的格式
             input_image = sam.preprocess(transformed_image) # 问题:这个preprocess是干嘛的？
+            # show_img(input_image, f'./test_img/test_preprocess.png')
+            # print(input_image.size())
+            # assert 1==0
 
             input_size = input_image.shape[-2:] # 1024 1024
             original_image_size = transformed_image.shape[-2:] # 512 512
@@ -148,6 +161,16 @@ for epoch in range(epoch_num):
                                 masks=None,
                                 boxes=None,
                             )
+                        elif args.bbox: # Use bounding box as prompt
+                            bbox = GetBBoxFromMask(gt_mask)
+                            box_torch = torch.as_tensor(bbox, dtype=torch.float, device=device)
+                            box_torch = box_torch.view(1,1,4)
+                            # print(box_torch.size())
+                            sparse_embeddings, dense_embeddings = sam.prompt_encoder(
+                                points=None,
+                                masks=None,
+                                boxes=box_torch,
+                            )
                     low_res_masks, iou_predictions = sam.mask_decoder(
                         image_embeddings=image_embedding,
                         image_pe=sam.prompt_encoder.get_dense_pe(),
@@ -155,6 +178,7 @@ for epoch in range(epoch_num):
                         dense_prompt_embeddings=dense_embeddings,
                         multimask_output=False,
                     )
+                    low_res_masks = low_res_masks[..., : 128, : 128]
 
                     upscaled_masks = sam.postprocess_masks(low_res_masks, input_size, original_image_size).to(device)
                     binary_mask = normalize(threshold(upscaled_masks, 0.0, 0))
@@ -162,6 +186,7 @@ for epoch in range(epoch_num):
                     gt_binary_mask = torch.as_tensor(gt_mask_resized > 0, dtype=torch.float32)
 
                     # show_mask(binary_mask, gt_binary_mask, input_point, k)
+                    # show_mask_lrum(low_res_masks, upscaled_masks, k)
 
 
                     loss = loss_fn(binary_mask, gt_binary_mask)
@@ -170,14 +195,19 @@ for epoch in range(epoch_num):
                     optimizer.step()
                     epoch_loss.append(loss.item())
                     dice = 2 * torch.sum(binary_mask * gt_binary_mask) / (torch.sum(binary_mask) + torch.sum(gt_binary_mask))
-                    print(f'dice: {dice.item()}')
+                    # print(f'dice: {dice.item()}')
                     epoch_dice[k].append(dice.item())
 
     print(f'Epoch:{epoch}')
     print(f'loss: {mean(epoch_loss)}')
     print(f'epoch_dice: {epoch_dice}')
-    # for k in range(1, 14):
-    #     epoch_dice[k] = mean(epoch_dice[k])
+    for k in range(1, 14):
+        epoch_dice[k] = mean(epoch_dice[k])
     print(f'dice: {epoch_dice}')
-    # print(f'mean dice: {mean(epoch_dice.values())}')
+    print(f'mean dice: {mean(epoch_dice.values())}')
+
+    losses.append(mean(epoch_loss))
+    dices.append(mean(epoch_dice.values()))
+
+plot_curve(losses, dices)
     
