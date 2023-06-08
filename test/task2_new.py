@@ -142,13 +142,16 @@ for epoch in range(epoch_num):
             input_size = input_image.shape[-2:] # 1024 1024
             original_image_size = transformed_image.shape[-2:] # 512 512
 
+            with torch.no_grad():
+                # encode
+                image_embedding = sam.image_encoder(input_image)
+
             # Iterate through all organs
             for k in range(1, 14):
                 gt_mask = label == k
                 if gt_mask.max() != 0:
                     with torch.no_grad():
-                        # encode
-                        image_embedding = sam.image_encoder(input_image)
+                        
                         # get prompt
                         if args.number: # Use points as prompt
                             input_point, input_label = GetPointsFromMask(gt_mask, args.number)
