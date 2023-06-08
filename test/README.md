@@ -18,10 +18,10 @@ segment-anything/
 │  │  ├─ labelsTr
 |  │  │  ├─ label0001.nii.gz
 |  │  │  ├─ ...
-│  │  ├─ imagesTest
+│  │  ├─ imagesTs
 |  │  │  ├─ img0035.nii.gz
 |  │  │  ├─ ...
-│  │  ├─ labelsTest
+│  │  ├─ labelsTs
 |  │  │  ├─ label00035.nii.gz
 |  │  │  ├─ ...
 ├─ sam_vit_h_4b8939.pth
