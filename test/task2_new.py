@@ -77,6 +77,7 @@ from statistics import mean
 from torch.nn.functional import threshold, normalize
 from tqdm import tqdm
 import torchvision.transforms as tfs
+from utils import *
 
 print('Start training')
 
@@ -85,6 +86,7 @@ wd = 0
 # 使用自适应的学习率
 optimizer = torch.optim.AdamW(sam.mask_decoder.parameters(), lr=lr, weight_decay=wd)
 loss_fn = torch.nn.MSELoss()
+loss_fn = my_dice_loss
 # data augmentation
 my_transform = tfs.Compose([
             tfs.RandomHorizontalFlip(p=0.5), 
@@ -94,7 +96,7 @@ my_transform = tfs.Compose([
 np.random.seed(0)
 dices = np.zeros(13, dtype=np.float32)
 times = np.zeros(13, dtype=np.float32)
-epoch_num = 10
+epoch_num = 100
 
 for epoch in range(epoch_num):
     epoch_loss = []
@@ -159,6 +161,8 @@ for epoch in range(epoch_num):
                     gt_mask_resized = torch.from_numpy(np.resize(gt_mask, (1, 1, gt_mask.shape[0], gt_mask.shape[1]))).to(device)
                     gt_binary_mask = torch.as_tensor(gt_mask_resized > 0, dtype=torch.float32)
 
+                    # show_mask(binary_mask, gt_binary_mask, input_point, k)
+
 
                     loss = loss_fn(binary_mask, gt_binary_mask)
                     optimizer.zero_grad()
@@ -172,14 +176,8 @@ for epoch in range(epoch_num):
     print(f'Epoch:{epoch}')
     print(f'loss: {mean(epoch_loss)}')
     print(f'epoch_dice: {epoch_dice}')
-    for k in range(1, 14):
-        epoch_dice[k] = mean(epoch_dice[k])
+    # for k in range(1, 14):
+    #     epoch_dice[k] = mean(epoch_dice[k])
     print(f'dice: {epoch_dice}')
-    print(f'mean dice: {mean(epoch_dice.values())}')
+    # print(f'mean dice: {mean(epoch_dice.values())}')
     
-
-
-dices /= times
-print('dices:', dices)
-print('times:', times)
-print('average:', np.mean(dices))
