@@ -41,6 +41,10 @@ train_path = 'BTCV/imagesTr'
 label_path = 'BTCV/labelsTr'
 train_list = os.listdir(train_path)
 label_list = os.listdir(label_path)
+train_list.sort()
+label_list.sort()
+train_list = train_list[:1]
+label_list = label_list[:1]
 
 # optimizer = torch.optim.Adam(sam.mask_decoder.parameters()) 
 
@@ -91,21 +95,35 @@ for i in range(len(train_list)):
         label = label_3d[:,:,j]
         for k in range(1, 14):
             gt_mask = label == k
+
+            #####直接用preprocess扩成三通道
             # input_point, input_label = GetPointsFromMask(gt_mask, 1)
-            transform = ResizeLongestSide(sam.image_encoder.img_size)#ResizeLongestSide是一个自定义的变换类，作用是将图像调整为具有指定最长边长度的目标大小。
-            input_image = transform.apply_image(img)#变换图像大小
-            input_image_torch = torch.as_tensor(input_image, device=device)#将调整过大小的图像转换成张量对象，分配给设备
-            transformed_image = input_image_torch.contiguous()[None, None, :, :]#将图像转换成模型需要的格式
+            # transform = ResizeLongestSide(sam.image_encoder.img_size)#ResizeLongestSide是一个自定义的变换类，作用是将图像调整为具有指定最长边长度的目标大小。
+            # input_image = transform.apply_image(img)#变换图像大小
+            # input_image_torch = torch.as_tensor(input_image, device=device)#将调整过大小的图像转换成张量对象，分配给设备
+            # transformed_image = input_image_torch.contiguous()[None, None, :, :]#将图像转换成模型需要的格式
+            # input_image = sam.preprocess(transformed_image)
+            #print("img_size = {}".format(img.shape))
+            #print("imput_image_size = {}".format(input_image.shape))
+
+            #####用cv2.COLOR_GRAY2RGB扩成三通道
+            input_image=cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
+            input_image_torch = torch.as_tensor(input_image, device=device)
+            print("input_image_size after GRAY2RGB = {}".format(input_image.shape))
+            transformed_image = input_image_torch.permute(2, 0, 1).contiguous()[None, :, :, :]#将图像转换成模型需要的格式
             input_image = sam.preprocess(transformed_image)
-            original_image_size = img.shape[:2]
-            input_size = input_image.shape[-2:]
+            print("input_image_size after transform = {}".format(transformed_image.shape))
+            print("input_image_size after preprocess = {}".format(input_image.shape))
+
+            original_image_size = img.shape[:2]  #512 512
+            input_size = input_image.shape[-2:]  #1024 1024
             if gt_mask.max() == 0: continue
             #往transformed_data中添加数据  
             # print(number_of_trained_data)
-            transformed_data[number_of_trained_data]["input_image"] = input_image
-            transformed_data[number_of_trained_data]["input_size"] = input_size
-            transformed_data[number_of_trained_data]["original_image_size"] = original_image_size
-            transformed_data[number_of_trained_data]["ground_truth_mask"] = gt_mask
+            transformed_data[number_of_trained_data]["input_image"] = input_image  #1 3 1024 1024
+            transformed_data[number_of_trained_data]["input_size"] = input_size  #1024 1024
+            transformed_data[number_of_trained_data]["original_image_size"] = original_image_size  #512 512
+            transformed_data[number_of_trained_data]["ground_truth_mask"] = gt_mask  #512 512
             number_of_trained_data += 1
 
 print (number_of_trained_data)
@@ -118,7 +136,7 @@ print(transformed_data[0]["ground_truth_mask"].shape)
 #from here end of the process
 
 
-lr = 1e-4
+lr = 1e-5
 wd = 0
 # optimizer = torch.optim.Adam(sam.mask_decoder.parameters(), lr=lr, weight_decay=wd)
 # 使用自适应的学习率
@@ -127,6 +145,32 @@ optimizer = torch.optim.AdamW(sam.mask_decoder.parameters(), lr=lr, weight_decay
 loss_fn = torch.nn.MSELoss()
 # loss_fn = torch.nn.BCELoss()
 keys = list(transformed_data.keys())
+
+
+def calc_dice(transformed_data, sam):
+    input_image = transformed_data['input_image'].to(device) #1 3 1024 1024
+    input_size = transformed_data['input_size'] #1024 1024
+    original_image_size = transformed_data['original_image_size'] #512 512
+    ground_truth_mask = transformed_data['ground_truth_mask'] #512 512
+    input_point, input_label = GetPointsFromMask(ground_truth_mask, 3)
+    predictor = SamPredictor(sam)
+    #ValueError: pic should be 2/3 dimensional. Got 4 dimensions.
+    predictor.set_image(cv2.cvtColor(img, cv2.COLOR_GRAY2RGB))
+    #print("SET_IMGE_SIZE = {}".format(input_image[0].shape))
+    #print("INPUT_POINT_SIZE = {}".format(input_point.shape))
+    #print("INPUT_LABEL_SIZE = {}".format(input_label.shape))
+    masks, _, _ = predictor.predict(
+        point_coords=input_point,
+        point_labels=input_label,
+        multimask_output=False,
+    )
+    #计算预测的dice
+    #print("masks.shape = {}".format(masks[0].shape))
+    #print("ground_truth_mask.shape = {}".format(ground_truth_mask.shape))
+    #dice = 2 * np.sum(masks[0] * (label == k)) / (np.sum(masks[0]) + np.sum((label == k)))
+    dice = 2 * np.sum(masks[0] * ground_truth_mask) / (np.sum(masks[0]) + np.sum(ground_truth_mask))
+    print(f'Dice: {dice}')
+
 
 
 
@@ -191,9 +235,4 @@ for epoch in range(num_epochs):
     losses.append(epoch_losses)
     print(f'EPOCH: {epoch}')
     print(f'Mean loss: {mean(epoch_losses)}')
-    #选择最后一个keys[-1]作为测试数据
-    input_image = transformed_data[keys[-1]]['input_image'].to(device)
-    input_size = transformed_data[keys[-1]]['input_size']
-    original_image_size = transformed_data[keys[-1]]['original_image_size']
-    ground_truth_mask = transformed_data[keys[-1]]['ground_truth_mask']
-    
+    calc_dice(transformed_data[keys[-1]], sam)
