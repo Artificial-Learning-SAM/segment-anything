@@ -106,6 +106,7 @@ for epoch in range(epoch_num):
                     # get prompt
                     if args.number: # Use points as prompt
                         input_point, input_label = GetPointsFromMask(gt_mask, args.number, args.center)
+                        input_point = transform.apply_coords(input_point, original_image_size)
                         input_point = torch.as_tensor(input_point, dtype=torch.float, device=device)
                         input_label = torch.as_tensor(input_label, dtype=torch.float, device=device)
                         input_point = input_point[None, :, :]

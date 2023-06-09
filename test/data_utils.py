@@ -33,9 +33,9 @@ class DataLoader:
             image_3d /= image_3d.max()
             image_slices = []
             label_slices = []
-            for i in range(image_3d.shape[2]):
-                image = image_3d[:,:,i]
-                label = label_3d[:,:,i]
+            for j in range(image_3d.shape[2]):
+                image = image_3d[:, :, j]
+                label = label_3d[:, :, j]
                 if label.max() == 0:
                     continue
 
