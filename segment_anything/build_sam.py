@@ -9,15 +9,16 @@ import torch
 from functools import partial
 
 from .modeling import ImageEncoderViT, MaskDecoder, PromptEncoder, Sam, TwoWayTransformer
+from .modeling import MaskDecoder2
 
-
-def build_sam_vit_h(checkpoint=None):
+def build_sam_vit_h(checkpoint=None, decoder_version=None):
     return _build_sam(
         encoder_embed_dim=1280,
         encoder_depth=32,
         encoder_num_heads=16,
         encoder_global_attn_indexes=[7, 15, 23, 31],
         checkpoint=checkpoint,
+        decoder_version=decoder_version,
     )
 
 
@@ -58,11 +59,13 @@ def _build_sam(
     encoder_num_heads,
     encoder_global_attn_indexes,
     checkpoint=None,
+    decoder_version=None,
 ):
     prompt_embed_dim = 256
     image_size = 1024
     vit_patch_size = 16
     image_embedding_size = image_size // vit_patch_size
+    decoder = MaskDecoder2 if decoder_version == 'task2' else MaskDecoder
     sam = Sam(
         image_encoder=ImageEncoderViT(
             depth=encoder_depth,
@@ -84,7 +87,7 @@ def _build_sam(
             input_image_size=(image_size, image_size),
             mask_in_chans=16,
         ),
-        mask_decoder=MaskDecoder(
+        mask_decoder=decoder(
             num_multimask_outputs=3,
             transformer=TwoWayTransformer(
                 depth=2,

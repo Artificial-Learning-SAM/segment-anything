@@ -1,15 +1,21 @@
 import os
 
 import cv2
+import torch
 import numpy as np
 import nibabel as nib
+from tqdm import tqdm
+
+from segment_anything.utils.transforms import ResizeLongestSide
 
 class DataLoader:
-    def __init__(self, mode):
-        self.mode = mode
-        self.image_idx = 0
-        self.slice_idx = 0
+    def __init__(self, mode, sam, args):
+        print(f'Loading {mode} data...')
+        self.sam = sam
+        self.args = args
+        self.idx = 0
 
+        # Get file list
         if mode == 'train' or mode == 'val':
             image_dir = 'BTCV/imagesTr'
             label_dir = 'BTCV/labelsTr'
@@ -29,8 +35,9 @@ class DataLoader:
             image_list = image_list[len(image_list) // 6 * 5:]
             label_list = label_list[len(label_list) // 6 * 5:]
 
-        self.images_3d = []
-        self.labels_3d = []
+        # Get every slice
+        self.slices = []
+        self.labels = []
         for i in range(len(image_list)):
             assert image_list[i][-11:] == label_list[i][-11:]
             image_path = os.path.join(image_dir, image_list[i])
@@ -39,8 +46,7 @@ class DataLoader:
             label_3d = nib.load(label_path).get_fdata()
             image_3d -= image_3d.min()
             image_3d /= image_3d.max()
-            image_slices = []
-            label_slices = []
+            
             for j in range(image_3d.shape[2]):
                 image = image_3d[:, :, j]
                 label = label_3d[:, :, j]
@@ -51,41 +57,94 @@ class DataLoader:
                 # colormap = mpl.colormaps['viridis']
                 # img = (colormap(img)[:, :, :3] * 255).astype(np.uint8)
 
-                image_slices.append(image)
-                label_slices.append(label)
+                self.slices.append(image)
+                self.labels.append(label)
 
-            image_3d = np.stack(image_slices, axis=0)
-            label_3d = np.stack(label_slices, axis=0)
+        self.original_size = self.slices[0].shape[:2]
+        self.input_size = (sam.image_encoder.img_size, sam.image_encoder.img_size)
 
-            self.images_3d.append(image_3d)
-            self.labels_3d.append(label_3d)
+        # Preprocess image embeddings
+        self.image_embeddings = []
+        self.transform = ResizeLongestSide(sam.image_encoder.img_size)
+        with torch.no_grad():
+            print('Preprocessing image embeddings...')
+            for i in tqdm(range(len(self.slices))):
+                image = self.transform.apply_image(self.slices[i])
+                image = torch.as_tensor(image, device=args.device)
+                image = image.permute(2, 0, 1).contiguous()
+                image = image[None, :, :, :]
+                self.image_embeddings.append(sam.image_encoder(sam.preprocess(image)))
 
-    def get_slice(self):
+        # Get every mask
+        self.masks = []
+        self.masks_idx = []
+        self.organ = []
+        for i in range(len(self.labels)):
+            for j in range(1, 14):
+                mask = (self.labels[i] == j).astype(np.uint8)
+                if mask.max() > 0:
+                    self.masks.append(mask)
+                    self.masks_idx.append(i)
+                    self.organ.append(j)
+        self.len = len(self.masks)
+        self.len = self.len // args.batch_size * args.batch_size
+
+        print(f'Loaded {mode} data.')
+
+    def get_batch(self):
         """
-        Get the next slice of the dataset.
+        Get the next batch of the dataset.
 
         Returns:
-            image: (H, W, 3)
-            label: (H, W)
         """
-        image = self.images_3d[self.image_idx][self.slice_idx]
-        label = self.labels_3d[self.image_idx][self.slice_idx]
-        self.slice_idx += 1
-        if self.slice_idx == self.images_3d[self.image_idx].shape[0]:
-            self.image_idx += 1
-            self.slice_idx = 0
-        if self.image_idx == len(self.images_3d):
-            self.image_idx = 0
-        return image, label
+        i = self.masks_idx[self.idx : self.idx + self.args.batch_size]
+        image_embeddings = [self.image_embeddings[_] for _ in i]
+        image_embeddings = torch.cat(image_embeddings, dim=0)
+        masks = self.masks[self.idx : self.idx + self.args.batch_size]
+        organ = self.organ[self.idx : self.idx + self.args.batch_size]
+        self.idx += self.args.batch_size
+        if self.idx == self.len:
+            self.idx = 0
 
-    def slice_num(self):
+        with torch.no_grad():
+            if self.args.number: # Use points as prompt
+                input_points, input_labels = [], [], []
+                for mask in masks:
+                    input_point, input_label = GetPointsFromMask(mask, self.args.number, self.args.center)
+                    input_point = self.transform.apply_coords(input_point, self.original_size)
+                    input_point = torch.as_tensor(input_point, dtype=torch.float, device=self.args.device)
+                    input_label = torch.as_tensor(input_label, dtype=torch.float, device=self.args.device)
+                    input_points.append(input_point)
+                    input_labels.append(input_label)
+                    
+                sparse_embeddings, dense_embeddings = self.sam.prompt_encoder(
+                    points = (torch.stack(input_points), torch.stack(input_labels)),
+                    boxes = None,
+                    masks = None,
+                )
+            elif self.args.bbox: # Use bounding box as prompt
+                boxes = []
+                for mask in masks:
+                    box = GetBBoxFromMask(mask, True)
+                    box = self.transform.apply_boxes(box, self.original_size)
+                    box_torch = torch.as_tensor(box, dtype=torch.float, device=self.args.device)
+                    boxes.append(box_torch)
+                
+                sparse_embeddings, dense_embeddings = self.sam.prompt_encoder(
+                    points = None,
+                    boxes = torch.stack(boxes),
+                    masks = None,
+                )
+
+        masks = np.array(masks)
+        masks = torch.as_tensor(masks, dtype=torch.float, device=self.args.device)
+        return image_embeddings, sparse_embeddings, dense_embeddings, masks, organ
+
+    def __len__(self):
         """
-        Get number of slices in dataset.
+        Get number of batches in dataset.
         """
-        num = 0
-        for image_3d in self.images_3d:
-            num += image_3d.shape[0]
-        return num
+        return self.len // self.args.batch_size
 
 
 def GetPointsFromMask(mask, number, include_center):

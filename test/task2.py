@@ -25,6 +25,12 @@ parser.add_argument('-b', '--bbox',
 parser.add_argument('-e', '--epoch', type=int,
                     help='Number of training epoch',
                     default=100)
+parser.add_argument('-bs', '--batch_size', type=int,
+                    help='Batch size',
+                    default=10)
+parser.add_argument('--device', type=str,
+                    help='Device to use (cpu or cuda)',
+                    default='cuda')
 args = parser.parse_args()
 
 print("Imports done")
@@ -32,9 +38,8 @@ print("Imports done")
 # Init SAM
 sam_checkpoint = "../sam_vit_h_4b8939.pth"
 model_type = "vit_h"
-device = "cuda"
-sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
-sam.to(device=device)
+sam = sam_model_registry[model_type](checkpoint=sam_checkpoint, decoder_version="task2")
+sam.to(device=args.device)
 sam.train()
 print("SAM initialized")
 
@@ -43,7 +48,6 @@ from statistics import mean
 from torch.nn.functional import threshold, normalize
 from tqdm import tqdm
 import torchvision.transforms as tfs
-from segment_anything.utils.transforms import ResizeLongestSide
 from utils import *
 
 print('Start training')
@@ -61,10 +65,8 @@ my_transform = tfs.Compose([
         ])
 
 np.random.seed(0)
-dataloader = DataLoader('train')
-dataloader_val = DataLoader('val')
-
-image_embeddings_cache = {'train': {}, 'val': {}}
+dataloader = DataLoader('train', sam, args)
+dataloader_val = DataLoader('val', sam, args)
 
 losses = []
 dices = []
@@ -77,81 +79,32 @@ def do_epoch(epoch, dataloader, mode):
     for k in range(1, 14):
         epoch_dice[k] = []
 
-    for i in tqdm(range(dataloader.slice_num())):
-        image, label = dataloader.get_slice()
+    for i in tqdm(range(len(dataloader))):
+        image_embeddings, sparse_embeddings, dense_embeddings, gt_masks, organ = dataloader.get_batch()
+        low_res_masks, iou_predictions = sam.mask_decoder(
+            image_embeddings=image_embeddings,
+            image_pe=sam.prompt_encoder.get_dense_pe(),
+            sparse_prompt_embeddings=sparse_embeddings,
+            dense_prompt_embeddings=dense_embeddings,
+            multimask_output=False,
+        )
 
-        transform = ResizeLongestSide(sam.image_encoder.img_size)
-        transformed_image = transform.apply_image(image)
-        transformed_image = torch.as_tensor(transformed_image, device=device).permute(2, 0, 1).contiguous()
-        
-        # Data augmentation
-        # input_image_torch = my_transform(input_image_torch)
+        input_size, original_size = dataloader.input_size, dataloader.original_size
+        upscaled_masks = sam.postprocess_masks(low_res_masks, input_size, original_size).to(args.device)
+        gt_binary_mask = torch.as_tensor(gt_masks > 0, dtype=torch.float32)[:, None, :, :]
 
-        transformed_image = transformed_image[None, :, :, :]#将图像转换成模型需要的格式
-        input_image = sam.preprocess(transformed_image)
+        if mode == 'train':
+            loss = loss_fn(upscaled_masks, gt_binary_mask)
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            epoch_loss.append(loss.item())
 
-        input_size = input_image.shape[-2:] # 1024 1024
-        original_image_size = image.shape[:2] # 512 512
-
-        with torch.no_grad():
-            # encode
-            if i in image_embeddings_cache[mode]:
-                image_embedding = image_embeddings_cache[mode][i]
-            else:
-                image_embedding = sam.image_encoder(input_image)
-                image_embeddings_cache[mode][i] = image_embedding
-
-        # Iterate through all organs
-        for k in range(1, 14):
-            gt_mask = label == k
-            if gt_mask.max() != 0:
-                with torch.no_grad():
-                    # get prompt
-                    if args.number: # Use points as prompt
-                        input_point, input_label = GetPointsFromMask(gt_mask, args.number, args.center)
-                        input_point = transform.apply_coords(input_point, original_image_size)
-                        input_point = torch.as_tensor(input_point, dtype=torch.float, device=device)
-                        input_label = torch.as_tensor(input_label, dtype=torch.float, device=device)
-                        input_point = input_point[None, :, :]
-                        input_label = input_label[None, :]
-                        sparse_embeddings, dense_embeddings = sam.prompt_encoder(
-                            points = (input_point, input_label), #输入点和标签
-                            boxes=None,
-                            masks=None,
-                        )
-                    elif args.bbox: # Use bounding box as prompt
-                        box = GetBBoxFromMask(gt_mask, True)
-                        box = transform.apply_boxes(box, original_image_size)
-                        box_torch = torch.as_tensor(box, dtype=torch.float, device=device)
-                        box_torch = box_torch[None, :]
-                        
-                        sparse_embeddings, dense_embeddings = sam.prompt_encoder(
-                            points=None,
-                            boxes=box_torch,
-                            masks=None,
-                        )
-                        
-                low_res_masks, iou_predictions = sam.mask_decoder(
-                    image_embeddings=image_embedding,
-                    image_pe=sam.prompt_encoder.get_dense_pe(),
-                    sparse_prompt_embeddings=sparse_embeddings,
-                    dense_prompt_embeddings=dense_embeddings,
-                    multimask_output=False,
-                )
-
-                upscaled_masks = sam.postprocess_masks(low_res_masks, input_size, original_image_size).to(device)
-                binary_mask = normalize(threshold(upscaled_masks, 0.0, 0))
-                gt_mask_resized = torch.from_numpy(np.resize(gt_mask, (1, 1, gt_mask.shape[0], gt_mask.shape[1]))).to(device)
-                gt_binary_mask = torch.as_tensor(gt_mask_resized > 0, dtype=torch.float32)
-
-                if mode == 'train':
-                    loss = loss_fn(upscaled_masks, gt_binary_mask)
-                    optimizer.zero_grad()
-                    loss.backward()
-                    optimizer.step()
-                    epoch_loss.append(loss.item())
-                dice = 2 * torch.sum(binary_mask * gt_binary_mask) / (torch.sum(binary_mask) + torch.sum(gt_binary_mask))
-                epoch_dice[k].append(dice.item())
+        for j in range(len(organ)):
+            pred = upscaled_masks[j] > 0
+            gt = gt_binary_mask[j]
+            dice = 2 * torch.sum(pred * gt) / (torch.sum(pred) + torch.sum(gt))
+            epoch_dice[organ[j]].append(dice.item())
 
     if mode == 'train':
         print(f'Epoch:{epoch}')
