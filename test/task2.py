@@ -62,14 +62,14 @@ my_transform = tfs.Compose([
 
 np.random.seed(0)
 dataloader = DataLoader('train')
-dices = np.zeros(13, dtype=np.float32)
-times = np.zeros(13, dtype=np.float32)
-epoch_num = args.epoch
+dataloader_val = DataLoader('val')
 
 losses = []
 dices = []
+dices_val = []
 
-for epoch in range(epoch_num):
+# Do one epoch, mode can be 'train' or 'val'
+def do_epoch(epoch, dataloader, mode):
     epoch_loss = []
     epoch_dice = {}
     for k in range(1, 14):
@@ -78,19 +78,15 @@ for epoch in range(epoch_num):
     for i in tqdm(range(dataloader.slice_num())):
         image, label = dataloader.get_slice()
 
-        transform = ResizeLongestSide(sam.image_encoder.img_size) # ResizeLongestSide是一个自定义的变换类，作用是将图像调整为具有指定最长边长度的目标大小。
-        transformed_image = transform.apply_image(image)  # 变换图像大小
-        
+        transform = ResizeLongestSide(sam.image_encoder.img_size)
+        transformed_image = transform.apply_image(image)
         transformed_image = torch.as_tensor(transformed_image, device=device).permute(2, 0, 1).contiguous()
-        # print(input_image_torch.size())
         
-        # data_augmentation
+        # Data augmentation
         # input_image_torch = my_transform(input_image_torch)
 
         transformed_image = transformed_image[None, :, :, :]#将图像转换成模型需要的格式
-        input_image = sam.preprocess(transformed_image) # 问题:这个preprocess是干嘛的？
-        # show_img(input_image, f'./test_img/test_preprocess.png')
-        # print(input_image.size())
+        input_image = sam.preprocess(transformed_image)
 
         input_size = input_image.shape[-2:] # 1024 1024
         original_image_size = image.shape[:2] # 512 512
@@ -118,7 +114,7 @@ for epoch in range(epoch_num):
                             masks=None,
                         )
                     elif args.bbox: # Use bounding box as prompt
-                        box = GetBBoxFromMask(gt_mask, False)
+                        box = GetBBoxFromMask(gt_mask, True)
                         box = transform.apply_boxes(box, original_image_size)
                         box_torch = torch.as_tensor(box, dtype=torch.float, device=device)
                         box_torch = box_torch[None, :]
@@ -136,39 +132,53 @@ for epoch in range(epoch_num):
                     dense_prompt_embeddings=dense_embeddings,
                     multimask_output=False,
                 )
-                # low_res_masks = low_res_masks[..., : 128, : 128]
 
                 upscaled_masks = sam.postprocess_masks(low_res_masks, input_size, original_image_size).to(device)
                 binary_mask = normalize(threshold(upscaled_masks, 0.0, 0))
                 gt_mask_resized = torch.from_numpy(np.resize(gt_mask, (1, 1, gt_mask.shape[0], gt_mask.shape[1]))).to(device)
                 gt_binary_mask = torch.as_tensor(gt_mask_resized > 0, dtype=torch.float32)
 
-                # show_mask(binary_mask, gt_binary_mask, input_point, k)
-                # show_mask_lrum(low_res_masks, upscaled_masks, k)
-
-
-                loss = loss_fn(upscaled_masks, gt_binary_mask)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                epoch_loss.append(loss.item())
+                if mode == 'train':
+                    loss = loss_fn(upscaled_masks, gt_binary_mask)
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+                    epoch_loss.append(loss.item())
                 dice = 2 * torch.sum(binary_mask * gt_binary_mask) / (torch.sum(binary_mask) + torch.sum(gt_binary_mask))
-                # print(f'dice: {dice.item()}')
                 epoch_dice[k].append(dice.item())
 
-    print(f'Epoch:{epoch}')
-    print(f'loss: {mean(epoch_loss)}')
-    # print(f'epoch_dice: {epoch_dice}')
+    if mode == 'train':
+        print(f'Epoch:{epoch}')
+        print(f'loss: {mean(epoch_loss)}')
+
     for k in range(1, 14):
         if len(epoch_dice[k]) != 0:
             epoch_dice[k] = mean(epoch_dice[k])
         else:
             epoch_dice[k] = 0
-    print(f'dice: {epoch_dice}')
-    print(f'mean dice: {mean(epoch_dice.values())}')
 
+    if mode == 'train':
+        print(f'dice: {epoch_dice}')
+        print(f'mean dice: {mean(epoch_dice.values())}')
+        return epoch_loss, mean(epoch_dice.values())
+    else:
+        print(f'val dice: {epoch_dice}')
+        print(f'val mean dice: {mean(epoch_dice.values())}')
+        return mean(epoch_dice.values())
+
+
+# Training
+for epoch in range(args.epoch):
+    epoch_loss, epoch_dice = do_epoch(epoch, dataloader, 'train')
     losses.append(mean(epoch_loss))
-    dices.append(mean(epoch_dice.values()))
+    dices.append(epoch_dice)
 
-plot_curve(losses, dices)
-    
+    # Validation
+    epoch_dice = do_epoch(epoch, dataloader_val, 'val')
+    dices_val.append(epoch_dice)
+
+    # Save model
+    torch.save(sam.mask_decoder.state_dict(), f'./model/epoch-{epoch}-val-{epoch_dice:.10f}.pth')
+
+
+plot_curve(losses, dices, dices_val)

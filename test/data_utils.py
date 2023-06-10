@@ -10,7 +10,7 @@ class DataLoader:
         self.image_idx = 0
         self.slice_idx = 0
 
-        if mode == 'train':
+        if mode == 'train' or mode == 'val':
             image_dir = 'BTCV/imagesTr'
             label_dir = 'BTCV/labelsTr'
         elif mode == 'test':
@@ -20,6 +20,14 @@ class DataLoader:
         label_list = os.listdir(label_dir)
         image_list.sort()
         label_list.sort()
+
+        # Split train and val
+        if mode == 'train':
+            image_list = image_list[:len(image_list) // 6 * 5]
+            label_list = label_list[:len(label_list) // 6 * 5]
+        elif mode == 'val':
+            image_list = image_list[len(image_list) // 6 * 5:]
+            label_list = label_list[len(label_list) // 6 * 5:]
 
         self.images_3d = []
         self.labels_3d = []
