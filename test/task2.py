@@ -64,6 +64,8 @@ np.random.seed(0)
 dataloader = DataLoader('train')
 dataloader_val = DataLoader('val')
 
+image_embeddings_cache = {'train': {}, 'val': {}}
+
 losses = []
 dices = []
 dices_val = []
@@ -93,7 +95,11 @@ def do_epoch(epoch, dataloader, mode):
 
         with torch.no_grad():
             # encode
-            image_embedding = sam.image_encoder(input_image)
+            if i in image_embeddings_cache[mode]:
+                image_embedding = image_embeddings_cache[mode][i]
+            else:
+                image_embedding = sam.image_encoder(input_image)
+                image_embeddings_cache[mode][i] = image_embedding
 
         # Iterate through all organs
         for k in range(1, 14):
@@ -180,5 +186,5 @@ for epoch in range(args.epoch):
     # Save model
     torch.save(sam.mask_decoder.state_dict(), f'./model/epoch-{epoch}-val-{epoch_dice:.10f}.pth')
 
-
-plot_curve(losses, dices, dices_val)
+    # Plot loss and dice
+    plot_curve(losses, dices, dices_val)
