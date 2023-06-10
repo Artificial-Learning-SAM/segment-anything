@@ -8,6 +8,7 @@ import nibabel as nib
 import cv2
 import matplotlib as mpl
 import torch
+from monai.losses import DiceCELoss
 
 from segment_anything import sam_model_registry, SamPredictor
 from data_utils import DataLoader, GetPointsFromMask, GetBBoxFromMask
@@ -50,9 +51,9 @@ print('Start training')
 lr = 1e-5
 wd = 0
 # 使用自适应的学习率
-optimizer = torch.optim.AdamW(sam.mask_decoder.parameters(), lr=lr, weight_decay=wd)
-loss_fn = torch.nn.MSELoss()
-# loss_fn = my_dice_loss
+# optimizer = torch.optim.AdamW(sam.mask_decoder.parameters(), lr=lr, weight_decay=wd)
+optimizer = torch.optim.Adam(sam.mask_decoder.parameters(), lr=lr)
+loss_fn = DiceCELoss(sigmoid=True, squared_pred=True, reduction='mean')
 # data augmentation
 my_transform = tfs.Compose([
             tfs.RandomHorizontalFlip(p=0.5), 
@@ -146,7 +147,7 @@ for epoch in range(epoch_num):
                 # show_mask_lrum(low_res_masks, upscaled_masks, k)
 
 
-                loss = loss_fn(binary_mask, gt_binary_mask)
+                loss = loss_fn(upscaled_masks, gt_binary_mask)
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
@@ -159,7 +160,10 @@ for epoch in range(epoch_num):
     print(f'loss: {mean(epoch_loss)}')
     # print(f'epoch_dice: {epoch_dice}')
     for k in range(1, 14):
-        epoch_dice[k] = mean(epoch_dice[k])
+        if len(epoch_dice[k]) != 0:
+            epoch_dice[k] = mean(epoch_dice[k])
+        else:
+            epoch_dice[k] = 0
     print(f'dice: {epoch_dice}')
     print(f'mean dice: {mean(epoch_dice.values())}')
 
