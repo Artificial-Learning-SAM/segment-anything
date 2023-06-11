@@ -3,10 +3,12 @@ import argparse
 import sys
 sys.path.append("..")
 
+import torch
 import numpy as np
 import nibabel as nib
 import cv2
 import matplotlib as mpl
+from tqdm import tqdm
 
 from segment_anything import sam_model_registry, SamPredictor
 from data_utils import DataLoader, GetPointsFromMask, GetBBoxFromMask
@@ -20,6 +22,15 @@ parser.add_argument('-c', '--center',
 parser.add_argument('-b', '--bbox',
                     help='Use bounding box of mask as prompt',
                     action='store_true')
+parser.add_argument('-bs', '--batch_size', type=int,
+                    help='Batch size',
+                    default=64)
+parser.add_argument('--device', type=str,
+                    help='Device to use (cpu or cuda)',
+                    default='cuda')
+parser.add_argument('--decoder_weight', type=str,
+                    help='Path to decoder weight',
+                    default=None)
 args = parser.parse_args()
 
 print("Imports done")
@@ -27,48 +38,40 @@ print("Imports done")
 # Init SAM
 sam_checkpoint = "../sam_vit_h_4b8939.pth"
 model_type = "vit_h"
-device = "cuda"
-sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
-sam.to(device=device)
-predictor = SamPredictor(sam)
+sam = sam_model_registry[model_type](checkpoint=sam_checkpoint, decoder_version="task2")
+sam.to(device=args.device)
+if args.decoder_weight is not None:
+    sam.mask_decoder.load_state_dict(torch.load(args.decoder_weight))
 print("SAM initialized")
 
 np.random.seed(0)
-dataloader = DataLoader('test')
+dataloader = DataLoader('test', sam, args)
 dices = np.zeros(13, dtype=np.float32)
-times = np.zeros(13, dtype=np.float32)
+count = np.zeros(13, dtype=np.float32)
 
-for i in range(dataloader.slice_num()):
-    image, label = dataloader.get_slice()
-    predictor.set_image(image)
-    
-    # Iterate through all organs
-    for k in range(1, 14):
-        mask = label == k
-        if mask.max() != 0:
-            if args.number: # Use points as prompt
-                input_point, input_label = GetPointsFromMask(mask, args.number, args.center)
-                masks, _, _ = predictor.predict(
-                    point_coords=input_point,
-                    point_labels=input_label,
-                    multimask_output=False,
-                )
-            elif args.bbox: # Use bounding box as prompt
-                bbox = GetBBoxFromMask(mask, random_shift=True)
-                masks, _, _ = predictor.predict(
-                    point_coords=None,
-                    point_labels=None,
-                    box=bbox[None, :],
-                    multimask_output=False,
-                )
+with torch.no_grad():
+    for i in tqdm(range(len(dataloader))):
+        image_embeddings, sparse_embeddings, dense_embeddings, gt_masks, organ = dataloader.get_batch()
+        low_res_masks, iou_predictions = sam.mask_decoder(
+            image_embeddings=image_embeddings,
+            image_pe=sam.prompt_encoder.get_dense_pe(),
+            sparse_prompt_embeddings=sparse_embeddings,
+            dense_prompt_embeddings=dense_embeddings,
+            multimask_output=False,
+        )
 
+        input_size, original_size = dataloader.input_size, dataloader.original_size
+        upscaled_masks = sam.postprocess_masks(low_res_masks, input_size, original_size).to(args.device)
+        gt_binary_mask = torch.as_tensor(gt_masks > 0, dtype=torch.float32)[:, None, :, :]
 
-            dice = 2 * np.sum(masks[0] * mask) / (np.sum(masks[0]) + np.sum(mask))
-            print(f"Slice {i}, Organ {k}, Dice {dice}")
-            dices[k-1] += dice
-            times[k-1] += 1
+        for j in range(len(organ)):
+            pred = upscaled_masks[j] > 0
+            gt = gt_binary_mask[j]
+            dice = 2 * torch.sum(pred * gt) / (torch.sum(pred) + torch.sum(gt))
+            dices[organ[j] - 1] += dice.item()
+            count[organ[j] - 1] += 1
 
-dices /= times
+dices /= count
 print('dices:', dices)
-print('times:', times)
+# print('count:', count)
 print('average:', np.mean(dices))
