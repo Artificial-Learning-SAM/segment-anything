@@ -24,10 +24,10 @@ parser.add_argument('-b', '--bbox',
                     action='store_true')
 parser.add_argument('-e', '--epoch', type=int,
                     help='Number of training epoch',
-                    default=100)
+                    default=300)
 parser.add_argument('-bs', '--batch_size', type=int,
                     help='Batch size',
-                    default=10)
+                    default=64)
 parser.add_argument('--device', type=str,
                     help='Device to use (cpu or cuda)',
                     default='cuda')
@@ -133,7 +133,8 @@ for epoch in range(args.epoch):
     dices.append(epoch_dice)
 
     # Validation
-    epoch_dice = do_epoch(epoch, dataloader_val, 'val')
+    with torch.no_grad():
+        epoch_dice = do_epoch(epoch, dataloader_val, 'val')
     dices_val.append(epoch_dice)
 
     # Save model

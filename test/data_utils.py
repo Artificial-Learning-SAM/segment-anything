@@ -108,7 +108,7 @@ class DataLoader:
 
         with torch.no_grad():
             if self.args.number: # Use points as prompt
-                input_points, input_labels = [], [], []
+                input_points, input_labels = [], []
                 for mask in masks:
                     input_point, input_label = GetPointsFromMask(mask, self.args.number, self.args.center)
                     input_point = self.transform.apply_coords(input_point, self.original_size)
