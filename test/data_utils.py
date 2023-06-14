@@ -4,6 +4,8 @@ import cv2
 import torch
 import numpy as np
 import nibabel as nib
+import matplotlib as mpl
+import psutil
 from tqdm import tqdm
 
 from segment_anything.utils.transforms import ResizeLongestSide
@@ -35,17 +37,29 @@ class DataLoader:
             image_list = image_list[len(image_list) // 6 * 5:]
             label_list = label_list[len(label_list) // 6 * 5:]
 
+        # Data augmentation
+        if mode == 'train':
+            self.transforms = [
+                lambda x: cv2.rotate(x, cv2.ROTATE_90_CLOCKWISE),
+                lambda x: cv2.rotate(x, cv2.ROTATE_180),
+                lambda x: cv2.flip(x, 0)
+            ]
+
         # Get every slice
-        self.slices = []
-        self.labels = []
+        slices = []
+        labels = []
         for i in range(len(image_list)):
             assert image_list[i][-11:] == label_list[i][-11:]
             image_path = os.path.join(image_dir, image_list[i])
             label_path = os.path.join(label_dir, label_list[i])
             image_3d = nib.load(image_path).get_fdata()
             label_3d = nib.load(label_path).get_fdata()
-            image_3d -= image_3d.min()
-            image_3d /= image_3d.max()
+
+            # Perform ScaleIntensityRange
+            a_min = -175
+            a_max = 250
+            image_3d = (image_3d - a_min) / (a_max - a_min)
+            image_3d = np.clip(image_3d, 0, 1)
             
             for j in range(image_3d.shape[2]):
                 image = image_3d[:, :, j]
@@ -55,21 +69,25 @@ class DataLoader:
 
                 image = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_GRAY2RGB)
                 # colormap = mpl.colormaps['viridis']
-                # img = (colormap(img)[:, :, :3] * 255).astype(np.uint8)
+                # image = (colormap(image)[:, :, :3] * 255).astype(np.uint8)
 
-                self.slices.append(image)
-                self.labels.append(label)
+                if mode == 'train':
+                    slices += self.augment(image)
+                    labels += self.augment(label)
+                else:
+                    slices.append(image)
+                    labels.append(label)
 
-        self.original_size = self.slices[0].shape[:2]
+        self.original_size = slices[0].shape[:2]
         self.input_size = (sam.image_encoder.img_size, sam.image_encoder.img_size)
 
         # Preprocess image embeddings
         self.image_embeddings = []
-        self.transform = ResizeLongestSide(sam.image_encoder.img_size)
+        self.resize = ResizeLongestSide(sam.image_encoder.img_size)
         with torch.no_grad():
             print('Preprocessing image embeddings...')
-            for i in tqdm(range(len(self.slices))):
-                image = self.transform.apply_image(self.slices[i])
+            for i in tqdm(range(len(slices))):
+                image = self.resize.apply_image(slices[i])
                 image = torch.as_tensor(image, device=args.device)
                 image = image.permute(2, 0, 1).contiguous()
                 image = image[None, :, :, :]
@@ -79,9 +97,9 @@ class DataLoader:
         self.masks = []
         self.masks_idx = []
         self.organ = []
-        for i in range(len(self.labels)):
+        for i in range(len(labels)):
             for j in range(1, 14):
-                mask = (self.labels[i] == j).astype(np.uint8)
+                mask = (labels[i] == j).astype(np.uint8)
                 if mask.max() > 0:
                     self.masks.append(mask)
                     self.masks_idx.append(i)
@@ -90,6 +108,23 @@ class DataLoader:
         self.len = self.len // args.batch_size * args.batch_size
 
         print(f'Loaded {mode} data.')
+
+    def augment(self, image):
+        """
+        Perform data augmentation.
+
+        Args:
+            image (np.ndarray): Image to be augmented.
+
+        Returns:
+            list: Augmented images.
+        """
+        images = [image]
+        for transform in self.transforms:
+            for i in range(len(images)):
+                images.append(transform(images[i]))
+        assert len(images) == 2**len(self.transforms)
+        return images
 
     def get_batch(self):
         """
@@ -111,7 +146,7 @@ class DataLoader:
                 input_points, input_labels = [], []
                 for mask in masks:
                     input_point, input_label = GetPointsFromMask(mask, self.args.number, self.args.center)
-                    input_point = self.transform.apply_coords(input_point, self.original_size)
+                    input_point = self.resize.apply_coords(input_point, self.original_size)
                     input_point = torch.as_tensor(input_point, dtype=torch.float, device=self.args.device)
                     input_label = torch.as_tensor(input_label, dtype=torch.float, device=self.args.device)
                     input_points.append(input_point)
@@ -126,7 +161,7 @@ class DataLoader:
                 boxes = []
                 for mask in masks:
                     box = GetBBoxFromMask(mask, True)
-                    box = self.transform.apply_boxes(box, self.original_size)
+                    box = self.resize.apply_boxes(box, self.original_size)
                     box_torch = torch.as_tensor(box, dtype=torch.float, device=self.args.device)
                     boxes.append(box_torch)
                 
