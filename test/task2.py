@@ -14,14 +14,8 @@ from segment_anything import sam_model_registry, SamPredictor
 from data_utils import DataLoader, GetPointsFromMask, GetBBoxFromMask
 
 parser = argparse.ArgumentParser(description='Task 1')
-parser.add_argument('-n', '--number', type=int,
-                    help='Number of points to sample from mask')
-parser.add_argument('-c', '--center',
-                    help='Use center (max distance to boundary) of mask as the first prompt',
-                    action='store_true')
-parser.add_argument('-b', '--bbox',
-                    help='Use bounding box of mask as prompt',
-                    action='store_true')
+parser.add_argument('-p', '--prompt', type=str,
+                    help='List of numbers. x>0 means sampling x points from mask. x<0 means sampling x points, but using center (max distance to boundary) of mask as the first point. x==0 means using bbox. E.g. "[0, 1, -1, 3]".')
 parser.add_argument('-e', '--epoch', type=int,
                     help='Number of training epoch',
                     default=300)
@@ -32,6 +26,8 @@ parser.add_argument('--device', type=str,
                     help='Device to use (cpu or cuda)',
                     default='cuda')
 args = parser.parse_args()
+
+args.prompt = eval(args.prompt)
 
 print("Imports done")
 
