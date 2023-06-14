@@ -105,11 +105,23 @@ average: 0.74336255
 ## CNN classifier performance
 *   3点训练的模型，bs=16，训练时image+gt_mask，val时image+pred_mask
 ```
-val acc: 0.7539473684210526
-test acc: TODO
+val acc: 0.83
+test acc: 0.8562956204379562
 ```
 
 *   3点训练的模型，bs=16，训练时image+pred_mask，val时image+pred_mask
+```
+val acc: TODO
+test acc: TODO
+```
+
+*   3点训练的模型，bs=16，训练时image+pred_mask，并采用数据增强，val时image+pred_mask
+```
+val acc: TODO
+test acc: TODO
+```
+
+*   3点训练的模型，bs=16，训练时image+pred_mask，并采用数据增强，以及增加背景的训练，val时image+pred_mask
 ```
 val acc: TODO
 test acc: TODO
