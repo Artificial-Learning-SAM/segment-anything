@@ -15,10 +15,10 @@ from data_utils import DataLoader, GetPointsFromMask, GetBBoxFromMask
 
 parser = argparse.ArgumentParser(description='Task 1')
 parser.add_argument('-p', '--prompt', type=str,
-                    help='List of numbers. x>0 means sampling x points from mask. x<0 means sampling x points, but using center (max distance to boundary) of mask as the first point. x==0 means using bbox. E.g. "[0, 1, -1, 3]".')
+                    help='List of numbers. x>0 means sampling x points from mask. x<0 means sampling |x| points, but using center (max distance to boundary) of mask as the first point. x==0 means using bbox. E.g. "[0, 1, -1, 3]".')
 parser.add_argument('-e', '--epoch', type=int,
                     help='Number of training epoch',
-                    default=300)
+                    default=1000)
 parser.add_argument('-bs', '--batch_size', type=int,
                     help='Batch size',
                     default=64)

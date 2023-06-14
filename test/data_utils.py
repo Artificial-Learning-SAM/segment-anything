@@ -130,7 +130,12 @@ class DataLoader:
             torch.Tensor: Image embeddings.
         """
         image_embeddings = []
+        last = -1
         for i in idxes:
+            if i == last:
+                image_embeddings.append(image_embeddings[-1])
+                continue
+            last = i
             path = f'embeddings/{self.mode}/{i}.pt'
             if os.path.exists(path):
                 image_embeddings.append(torch.load(path))
@@ -168,60 +173,35 @@ class DataLoader:
 
         # Get the prompt embeddings
         with torch.no_grad():
-            types = len(self.args.prompt)
-            inputs, sparse, dense = {}, {}, {}
-            for i in self.args.prompt:
-                if i == 0:
-                    inputs[i] = []
-                else:
-                    inputs[i] = [[], []]
-
-            # Preprocess the prompts
-            prompt_types = []
-            for i in range(len(masks)):
-                mask = masks[i]
-                prompt_type = random.choice(self.args.prompt)
-                prompt_types.append(prompt_type)
-                if prompt_type == 0: # Use bbox as prompt
+            prompt_type = random.choice(self.args.prompt)
+            if prompt_type == 0: # Use bbox as prompt
+                boxes = []
+                for mask in masks:
                     box = GetBBoxFromMask(mask, True)
                     box = self.resize.apply_boxes(box, self.original_size)
                     box_torch = torch.as_tensor(box, dtype=torch.float, device=self.args.device)
-                    inputs[0].append(box_torch)
-                else: # Use points as prompt
+                    boxes.append(box_torch)
+                sparse_embeddings, dense_embeddings = self.sam.prompt_encoder(
+                    points = None,
+                    boxes = torch.stack(boxes),
+                    masks = None,
+                )
+            else: # Use points as prompt
+                input_points, input_labels = [], []
+                for mask in masks:
                     input_point, input_label = GetPointsFromMask(
                         mask, abs(prompt_type), prompt_type < 0
                     )
                     input_point = self.resize.apply_coords(input_point, self.original_size)
                     input_point = torch.as_tensor(input_point, dtype=torch.float, device=self.args.device)
                     input_label = torch.as_tensor(input_label, dtype=torch.float, device=self.args.device)
-                    inputs[prompt_type][0].append(input_point)
-                    inputs[prompt_type][1].append(input_label)
-                    
-            # Each type of prompts are encoded as a batch
-            for i in self.args.prompt:
-                if i == 0:
-                    sparse[i], dense[i] = self.sam.prompt_encoder(
-                        points = None,
-                        boxes = torch.stack(inputs[0]),
-                        masks = None,
-                    )
-                else:
-                    sparse[i], dense[i] = self.sam.prompt_encoder(
-                        points = (torch.stack(inputs[i][0]), torch.stack(inputs[i][1])),
-                        boxes = None,
-                        masks = None,
-                    )
-            
-            # Get the embeddings
-            sparse_embeddings = []
-            dense_embeddings = []
-            for i in range(len(masks)):
-                sparse_embeddings.append(sparse[prompt_types[i]][0])
-                sparse[prompt_types[i]] = sparse[prompt_types[i]][1:]
-                dense_embeddings.append(dense[prompt_types[i]][0])
-                dense[prompt_types[i]] = dense[prompt_types[i]][1:]
-            sparse_embeddings = torch.stack(sparse_embeddings)
-            dense_embeddings = torch.stack(dense_embeddings)
+                    input_points.append(input_point)
+                    input_labels.append(input_label)
+                sparse_embeddings, dense_embeddings = self.sam.prompt_encoder(
+                    points = (torch.stack(input_points), torch.stack(input_labels)),
+                    boxes = None,
+                    masks = None,
+                )
 
         masks = np.array(masks)
         masks = torch.as_tensor(masks, dtype=torch.float, device=self.args.device)

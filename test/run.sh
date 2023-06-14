@@ -8,4 +8,4 @@
 #SBATCH --cpus-per-task=10
 #SBATCH --time 24:00:00
 
-python -u task2.py -p "[0, 1, -1]"
+python -u task2.py -p "[0, 1, -1, 3, -3]"
