@@ -13,6 +13,7 @@ from segment_anything.utils.transforms import ResizeLongestSide
 class DataLoader:
     def __init__(self, mode, sam, args):
         print(f'Loading {mode} data...')
+        self.mode = mode
         self.sam = sam
         self.args = args
         self.idx = 0
@@ -78,20 +79,12 @@ class DataLoader:
                     slices.append(image)
                     labels.append(label)
 
+            break
+
+        self.slices = slices
         self.original_size = slices[0].shape[:2]
         self.input_size = (sam.image_encoder.img_size, sam.image_encoder.img_size)
-
-        # Preprocess image embeddings
-        self.image_embeddings = []
         self.resize = ResizeLongestSide(sam.image_encoder.img_size)
-        with torch.no_grad():
-            print('Preprocessing image embeddings...')
-            for i in tqdm(range(len(slices))):
-                image = self.resize.apply_image(slices[i])
-                image = torch.as_tensor(image, device=args.device)
-                image = image.permute(2, 0, 1).contiguous()
-                image = image[None, :, :, :]
-                self.image_embeddings.append(sam.image_encoder(sam.preprocess(image)))
 
         # Get every mask
         self.masks = []
@@ -108,6 +101,7 @@ class DataLoader:
         self.len = self.len // args.batch_size * args.batch_size
 
         print(f'Loaded {mode} data.')
+        print(psutil.Process(os.getpid()).memory_info().rss / 1024 ** 3, 'GB')
 
     def augment(self, image):
         """
@@ -125,6 +119,38 @@ class DataLoader:
                 images.append(transform(images[i]))
         assert len(images) == 2**len(self.transforms)
         return images
+    
+    def get_image_embeddings(self, idxes):
+        """
+        Get image embeddings.
+
+        Args:
+            idxes (list): Indexes of the images.
+
+        Returns:
+            torch.Tensor: Image embeddings.
+        """
+        image_embeddings = []
+        for i in idxes:
+            path = f'embeddings/{self.mode}/{i}.pt'
+            if os.path.exists(path):
+                image_embeddings.append(torch.load(path))
+            else:
+                with torch.no_grad():
+                    image = self.resize.apply_image(self.slices[i])
+                    image = torch.as_tensor(image, device=self.args.device)
+                    image = image.permute(2, 0, 1).contiguous()
+                    image = image[None, :, :, :]
+                    image = self.sam.image_encoder(self.sam.preprocess(image))
+                image_embeddings.append(image)
+                if not os.path.exists('embeddings'):
+                    os.mkdir('embeddings')
+                if not os.path.exists(f'embeddings/{self.mode}'):
+                    os.mkdir(f'embeddings/{self.mode}')
+                torch.save(image, path)
+
+        image_embeddings = torch.cat(image_embeddings, dim=0)
+        return image_embeddings
 
     def get_batch(self):
         """
@@ -132,9 +158,9 @@ class DataLoader:
 
         Returns:
         """
-        i = self.masks_idx[self.idx : self.idx + self.args.batch_size]
-        image_embeddings = [self.image_embeddings[_] for _ in i]
-        image_embeddings = torch.cat(image_embeddings, dim=0)
+        image_embeddings = self.get_image_embeddings(
+            self.masks_idx[self.idx : self.idx + self.args.batch_size]
+        )
         masks = self.masks[self.idx : self.idx + self.args.batch_size]
         organ = self.organ[self.idx : self.idx + self.args.batch_size]
         self.idx += self.args.batch_size
