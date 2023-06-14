@@ -7,7 +7,7 @@ def my_dice_loss(pred_mask, gt_mask):
     loss = 1 - dice
     return loss
 
-def plot_curve(losses, dices, dices_val):
+def plot_curve(losses, dices, dices_val, criterion='Dice'):
 
     plt.figure(figsize=(5,5))
     plt.plot(list(range(len(losses))), losses)
@@ -18,17 +18,17 @@ def plot_curve(losses, dices, dices_val):
 
     plt.figure(figsize=(5,5))
     plt.plot(list(range(len(dices))), dices)
-    plt.title('Mean epoch dice')
+    plt.title(f'Mean epoch {criterion.lower()}')
     plt.xlabel('Epoch Number')
-    plt.ylabel('Dice')
-    plt.savefig('dice.png')
+    plt.ylabel(f'{criterion}')
+    plt.savefig(f'{criterion.lower()}.png')
 
     plt.figure(figsize=(5,5))
     plt.plot(list(range(len(dices_val))), dices_val)
-    plt.title('Mean epoch validation dice')
+    plt.title(f'Mean epoch validation {criterion.lower()}')
     plt.xlabel('Epoch Number')
-    plt.ylabel('Dice')
-    plt.savefig('dice_val.png')
+    plt.ylabel(f'{criterion}')
+    plt.savefig(f'{criterion.lower()}_val.png')
     
 
 def show_mask(pred_mask, gt_mask, input_point, k):
