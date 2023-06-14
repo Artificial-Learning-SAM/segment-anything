@@ -29,6 +29,7 @@ segment-anything/
 
 35 号至 40 号数据用于测试，其余 24 个数据用于训练。
 
+# Task1 & Task2
 ## Performance on the test set
 
 以下默认 bbox 有扰动。
@@ -98,4 +99,18 @@ dices: [0.873584   0.9143843  0.91996086 0.5909526  0.7627533  0.89812344
  0.80941117 0.8827119  0.8080632  0.4747784  0.6457024  0.5053456
  0.5779429 ]
 average: 0.74336255
+```
+
+# Task3
+## CNN classifier performance
+*   3点训练的模型，bs=16，训练时image+gt_mask，val时image+pred_mask
+```
+val acc: 0.7539473684210526
+test acc: TODO
+```
+
+*   3点训练的模型，bs=16，训练时image+pred_mask，val时image+pred_mask
+```
+val acc: TODO
+test acc: TODO
 ```
