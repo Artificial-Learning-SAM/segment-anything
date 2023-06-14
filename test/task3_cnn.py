@@ -11,17 +11,19 @@ import torch
 from monai.losses import DiceCELoss
 
 from segment_anything import sam_model_registry, SamPredictor
-from data_utils_cnn import DataLoader, GetPointsFromMask, GetBBoxFromMask
+from data_utils_cnn2 import DataLoader, GetPointsFromMask, GetBBoxFromMask
 
 parser = argparse.ArgumentParser(description='Task 1')
-parser.add_argument('-n', '--number', type=int,
-                    help='Number of points to sample from mask')
-parser.add_argument('-c', '--center',
-                    help='Use center (max distance to boundary) of mask as the first prompt',
-                    action='store_true')
-parser.add_argument('-b', '--bbox',
-                    help='Use bounding box of mask as prompt',
-                    action='store_true')
+# parser.add_argument('-n', '--number', type=int,
+#                     help='Number of points to sample from mask')
+# parser.add_argument('-c', '--center',
+#                     help='Use center (max distance to boundary) of mask as the first prompt',
+#                     action='store_true')
+# parser.add_argument('-b', '--bbox',
+#                     help='Use bounding box of mask as prompt',
+#                     action='store_true')
+parser.add_argument('-p', '--prompt', type=str,
+                    help='List of numbers. x>0 means sampling x points from mask. x<0 means sampling x points, but using center (max distance to boundary) of mask as the first point. x==0 means using bbox. E.g. "[0, 1, -1, 3]".')
 parser.add_argument('-e', '--epoch', type=int,
                     help='Number of training epoch',
                     default=300)
@@ -35,6 +37,8 @@ parser.add_argument('--decoder_weight', type=str,
                     help='Path to decoder weight',
                     default=None)
 args = parser.parse_args()
+
+args.prompt = eval(args.prompt)
 
 print("Imports done")
 
@@ -75,13 +79,12 @@ my_transform = tfs.Compose([
         ])
 
 np.random.seed(0)
-dataloader = DataLoader('train', sam, args)
-dataloader_val = DataLoader('val', sam, args)
+dataloader = DataLoader('train', sam, args, get_cnn = True)
+dataloader_val = DataLoader('val', sam, args, get_cnn = True)
 
 losses = []
 acc = []
 acc_val = []
-
 
 # Do one epoch, mode can be 'train' or 'val'
 def do_epoch(epoch, dataloader, mode):
@@ -92,7 +95,7 @@ def do_epoch(epoch, dataloader, mode):
         epoch_dice[k] = []
 
     for i in tqdm(range(len(dataloader))):
-        image_embeddings, sparse_embeddings, dense_embeddings, gt_masks, organ, img_cnn= dataloader.get_batch(get_img = True)
+        image_embeddings, sparse_embeddings, dense_embeddings, gt_masks, organ, img_cnn= dataloader.get_batch()
         # print(image_embeddings.size())
         # torch.Size([2, 256, 64, 64])
         # bs*256*64*64
@@ -178,7 +181,10 @@ for epoch in range(args.epoch):
     acc_val.append(epoch_val_acc)
 
     # # Save model
-    # torch.save(sam.mask_decoder.state_dict(), f'./model/epoch-{epoch}-val-{epoch_dice:.10f}.pth')
+    torch.save(vgg.state_dict(), f'./cnn_model/gt_epoch-{epoch}-val-{epoch_acc:.10f}.pth')
 
     # Plot loss and dice
     plot_curve(losses, acc, acc_val, 'Acc')
+
+print(max(acc_val))
+print(np.argmax(np.array(acc_val)))
