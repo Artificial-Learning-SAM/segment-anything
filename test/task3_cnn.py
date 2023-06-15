@@ -11,7 +11,7 @@ import torch
 from monai.losses import DiceCELoss
 
 from segment_anything import sam_model_registry, SamPredictor
-from data_utils_cnn2 import DataLoader, GetPointsFromMask, GetBBoxFromMask
+from data_utils import DataLoader, GetPointsFromMask, GetBBoxFromMask
 
 parser = argparse.ArgumentParser(description='Task 1')
 # parser.add_argument('-n', '--number', type=int,
@@ -96,6 +96,7 @@ def do_epoch(epoch, dataloader, mode):
 
     for i in tqdm(range(len(dataloader))):
         image_embeddings, sparse_embeddings, dense_embeddings, gt_masks, organ, img_cnn= dataloader.get_batch()
+        # print(img_cnn.size())
         # print(image_embeddings.size())
         # torch.Size([2, 256, 64, 64])
         # bs*256*64*64
@@ -130,7 +131,7 @@ def do_epoch(epoch, dataloader, mode):
             output = vgg(input)
 
             label_organ = torch.as_tensor(organ, device=args.device) # crossentropyloss的target是从0开始的
-            label_organ = label_organ - 1
+            # label_organ = label_organ - 1
             loss = loss_fn(output, label_organ)
             # print(f'loss:{loss.item()}')
             optimizer.zero_grad()
@@ -147,7 +148,6 @@ def do_epoch(epoch, dataloader, mode):
             output = vgg(input)
 
             label_organ = torch.as_tensor(organ, device=args.device) # crossentropyloss的target是从0开始的
-            label_organ = label_organ - 1
             loss = loss_fn(output, label_organ)
             
             epoch_loss.append(loss.item())
@@ -181,7 +181,7 @@ for epoch in range(args.epoch):
     acc_val.append(epoch_val_acc)
 
     # # Save model
-    torch.save(vgg.state_dict(), f'./cnn_model/gt_epoch-{epoch}-val-{epoch_acc:.10f}.pth')
+    torch.save(vgg.state_dict(), f'./cnn_model/gt_au/gt_au_epoch-{epoch}-val-{epoch_val_acc:.10f}.pth')
 
     # Plot loss and dice
     plot_curve(losses, acc, acc_val, 'Acc')
