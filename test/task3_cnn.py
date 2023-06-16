@@ -49,6 +49,7 @@ sam = sam_model_registry[model_type](checkpoint=sam_checkpoint, decoder_version=
 sam.to(device=args.device)
 if args.decoder_weight is not None:
     sam.mask_decoder.load_state_dict(torch.load(args.decoder_weight))
+sam.eval()
 print("SAM initialized")
 
 # Start training
@@ -181,7 +182,7 @@ for epoch in range(args.epoch):
     acc_val.append(epoch_val_acc)
 
     # # Save model
-    torch.save(vgg.state_dict(), f'./cnn_model/gt_au/gt_au_epoch-{epoch}-val-{epoch_val_acc:.10f}.pth')
+    torch.save(vgg.state_dict(), f'./cnn_model/gt/gt_epoch-{epoch}-val-{epoch_val_acc:.10f}.pth')
 
     # Plot loss and dice
     plot_curve(losses, acc, acc_val, 'Acc')
