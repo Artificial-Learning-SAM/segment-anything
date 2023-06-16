@@ -24,7 +24,7 @@ parser.add_argument('--device', type=str,
                     default='cuda')
 parser.add_argument('--decoder_weight', type=str,
                     help='Path to decoder weight',
-                    default=None)
+                    default="epoch-119-val-0.8411638965.pth")
 args = parser.parse_args()
 
 args.prompt = eval(args.prompt)
@@ -48,23 +48,76 @@ from cnn_network import vgg11_bn
 # Init vgg
 vgg = vgg11_bn()
 vgg = vgg.to(device=args.device)
-# path_vgg = "./gt_epoch-19-val-0.5212053571.pth"
-# state = torch.load(path_vgg)
-# print(state)
-# vgg.load_state_dict(state)
+path_vgg = "./gt_epoch-19-val-0.5212053571.pth"
+state = torch.load(path_vgg)
+vgg.load_state_dict(state)
+vgg.eval()
 print("VGG initialized")
+
+# from segment_anything.modeling.mask_decoder_3 import MaskDecoder3
+# from segment_anything.modeling.transformer import TwoWayTransformer
+# prompt_embed_dim = 256
+# class_decoder=MaskDecoder3(
+#             num_multimask_outputs=3,
+#             transformer=TwoWayTransformer(
+#                 depth=3,
+#                 embedding_dim=prompt_embed_dim,
+#                 mlp_dim=2048,
+#                 num_heads=8,
+#             ),
+#             transformer_dim=prompt_embed_dim,
+#             iou_head_depth=3,
+#             iou_head_hidden_dim=256,
+#         )
+
+# class_decoder.to(device=args.device)
+# state = torch.load("./epoch-6-val-0.68139.pth")
+# class_decoder.load_state_dict(state)
+# print("class_decoder initialized")
 
 np.random.seed(0)
 dataloader = DataLoader('test', sam, args , single_nii=True)
 mask_generator = SamAutomaticMaskGenerator(sam , pred_iou_thresh=0.5 ,box_nms_thresh= 0.7)
 
+# def decoder_classifier(image , anns):
+#     image = torch.from_numpy(image) #512*512
+#     #transform into 1 * 3 * 512 * 512
+#     image = image.unsqueeze(0).repeat(1,3,1,1)
+#     #to float
+#     image = image.float()
+#     img_embedding = sam.image_encoder(sam.preprocess(image.to(device=args.device)))
+#     from segment_anything.utils.transforms import ResizeLongestSide
+#     resize = ResizeLongestSide(sam.image_encoder.img_size)
+#     original_size = image.shape[-2:]
+#     for ann in anns:
+#         box = ann['bbox']
+#         box = np.array(box)
+#         box = resize.apply_boxes(box, original_size)
+#         box_torch = torch.as_tensor(box, dtype=torch.float, device=args.device)
+#         sparse, dense = sam.prompt_encoder(
+#             points = None,
+#             boxes = torch.stack([box_torch], dim=0),
+#             masks = None,
+#         )
+#         #output device for all tensors
+#         _,_,class_logits = class_decoder(
+#             image_embeddings=img_embedding,
+#             image_pe=sam.prompt_encoder.get_dense_pe(),
+#             sparse_prompt_embeddings=sparse,
+#             dense_prompt_embeddings=dense,
+#             multimask_output=False,
+#         )
+#         vclass = torch.argmax(class_logits , dim=1).item()
+#         ann['organ'] = vclass
+#     # assert False
+#     return anns
+    
 
 def cnn_classifier(image , anns):
     image = torch.from_numpy(image) 
     num = len(anns)
     #image : 512*512
     #masks : DICT
-    
     #input : num * 2 * 512 * 512
     image = image.unsqueeze(0).repeat(num,1,1).unsqueeze(1)
     masks = torch.stack([torch.from_numpy(ann['segmentation']).unsqueeze(0) for ann in anns], dim=0)
@@ -75,11 +128,16 @@ def cnn_classifier(image , anns):
     input = torch.cat((image , masks) , dim=1)
     input = input.float()
     input = input.to(device=args.device)
-    print("input_shape = ",input.shape)
-    output = vgg(input)
-    output_class = torch.argmax(output , dim=1)
+    # print("input_shape = ",input.shape)
     for i in range(num):
-        anns[i]['organ'] = output_class[i] . item()
+        print(input[i].unsqueeze(0).shape)
+        # print(input[i])
+        output = vgg(input[i].unsqueeze(0))
+        print(output)
+        output_class = torch.argmax(output , dim=1)
+        anns[i]['organ'] = output_class
+        print('area = ',anns[i]['area'])
+        print("organ = ",output_class)
     return anns
     
 
@@ -121,7 +179,7 @@ def show_image_masks(image, masks, gt_mask,id):
         x_mean = np.mean(x).astype(int)
         y_mean = np.mean(y).astype(int)
         print(x_mean, y_mean, organ)
-        plt.text(x_mean, y_mean, organ, fontsize=20, color='red', ha='center', va='center')
+        plt.text(x_mean, y_mean, organ, fontsize=80, color='red', ha='center', va='center')
     plt.axis('off')
     
     plt.subplot(1,2,2)
@@ -135,9 +193,20 @@ def show_image_masks(image, masks, gt_mask,id):
     plt.imshow(image, cmap='gray')
     output = np.zeros(gt_mask.shape + (4,))
     for i in range(1,14):
+        if np.sum(gt_mask == i) == 0:
+            continue
         color = cmap(i)
         color = (color[0],color[1],color[2],1)
         output[gt_mask == i] = color
+        
+        segmentation = gt_mask == i
+        organ = i
+        y, x = np.where(segmentation)
+        x_mean = np.mean(x).astype(int)
+        y_mean = np.mean(y).astype(int)
+        # print(x_mean, y_mean, organ)
+        plt.text(x_mean, y_mean, organ, fontsize=80, color='red', ha='center', va='center')
+
     plt.imshow(output)
     plt.axis('off')
     
@@ -153,8 +222,7 @@ def delete_multiple_masks(masks):
     #     if organ == 0:
     #         continue
     #     if organ not in organ_masks or area > organ_masks[organ]['area']:
-            # organ_masks[organ] = mask
-    return masks
+    #         organ_masks[organ] = mask
     # Convert the dictionary back to a list
     return list(organ_masks.values())
 
@@ -181,11 +249,13 @@ with torch.no_grad():
         #gt_mask : (512,512)
         pred_masks = mask_generator.generate(image)
         print(len(pred_masks))
+        print(pred_masks[0].keys())
         count_masks = len(pred_masks)
         # print(f"Found {count_masks} masks")
         print(pred_masks[0].keys())
         image = image[:,:,0]
         pred_masks = cnn_classifier(image , pred_masks)
+        # pred_masks = decoder_classifier(image , pred_masks)
         pred_masks = delete_multiple_masks(pred_masks)
         show_image_masks(image , pred_masks,gt_mask ,i)
         #the number of non-zero element in gt_mask , multipky count only once
@@ -193,12 +263,3 @@ with torch.no_grad():
         #gt_masks: (num_gt,512,512)
         #gt_masks
         # show_masks_with_class(image , pred_masks , pred_organ_label)
-
-        # show_masks_with_class(image , 
-
-
-
-
-
-def show_masks_with_class(image , masks , classifier):
-    pass
