@@ -181,8 +181,9 @@ for epoch in range(args.epoch):
         epoch_val_loss, epoch_val_acc = do_epoch(epoch, dataloader_val, 'val')
     acc_val.append(epoch_val_acc)
 
-    # # Save model
-    torch.save(vgg.state_dict(), f'./cnn_model/gt/gt_epoch-{epoch}-val-{epoch_val_acc:.10f}.pth')
+    if epoch_val_acc >= (max(acc_val)-0.01) or epoch % 5 ==0:
+        # Save model
+        torch.save(vgg.state_dict(), f'./cnn_model/gt_au/gt_epoch-{epoch}-val-{epoch_val_acc:.10f}.pth')
 
     # Plot loss and dice
     plot_curve(losses, acc, acc_val, 'Acc')
