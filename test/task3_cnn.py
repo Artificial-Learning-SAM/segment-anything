@@ -110,8 +110,6 @@ def do_epoch(epoch, dataloader, mode):
                 dense_prompt_embeddings=dense_embeddings,
                 multimask_output=False,
             )
-            # print(f'low_res:{low_res_masks.size()}')
-            # low_res:torch.Size([2, 1, 256, 256])
 
             input_size, original_size = dataloader.input_size, dataloader.original_size
             upscaled_masks = sam.postprocess_masks(low_res_masks, input_size, original_size).to(args.device)

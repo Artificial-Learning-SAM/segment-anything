@@ -1,5 +1,6 @@
 test/BTCV/
 test/embeddings/
+test/*.png
 
 .nfs*
 

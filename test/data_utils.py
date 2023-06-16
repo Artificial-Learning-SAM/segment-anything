@@ -33,8 +33,15 @@ class DataLoader:
         image_list.sort()
         label_list.sort()
         if single_nii:
-            image_list = image_list[:1]
-            label_list = label_list[:1]        
+            if mode == 'train':
+                image_list = image_list[:6]
+                label_list = label_list[:6]
+            elif mode == 'val':
+                image_list = image_list[:6]
+                label_list = label_list[:6]
+            elif mode == 'test':
+                image_list = image_list[:1]
+                label_list = label_list[:1] 
 
         # Split train and val
         if mode == 'train':
