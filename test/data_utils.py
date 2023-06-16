@@ -12,13 +12,14 @@ from tqdm import tqdm
 from segment_anything.utils.transforms import ResizeLongestSide
 
 class DataLoader:
-    def __init__(self, mode, sam, args, get_cnn=False):
+    def __init__(self, mode, sam, args, get_cnn=False, aug=True):
         print(f'Loading {mode} data...')
         self.mode = mode
         self.sam = sam
         self.args = args
         self.idx = 0
         self.get_cnn = get_cnn
+        self.aug = aug
 
         # Get file list
         if mode == 'train' or mode == 'val':
@@ -52,8 +53,7 @@ class DataLoader:
         slices = []
         labels = []
         
-        for i in range(1):
-        # for i in range(len(image_list)):
+        for i in range(len(image_list)):
             assert image_list[i][-11:] == label_list[i][-11:]
             image_path = os.path.join(image_dir, image_list[i])
             label_path = os.path.join(label_dir, label_list[i])
@@ -76,7 +76,7 @@ class DataLoader:
                 # colormap = mpl.colormaps['viridis']
                 # image = (colormap(image)[:, :, :3] * 255).astype(np.uint8)
 
-                if mode == 'train':
+                if mode == 'train' and self.aug:
                     slices += self.augment(image)
                     labels += self.augment(label)
                 else:
@@ -88,10 +88,6 @@ class DataLoader:
         self.input_size = (sam.image_encoder.img_size, sam.image_encoder.img_size)
         self.resize = ResizeLongestSide(sam.image_encoder.img_size)
 
-        # Process img_cnn
-        # if get_cnn:
-        #     for i in tqdm(range(len(self.slices))):
-        #         self.cnn_slices.append(self.slices[i,:,:,0] / 255)
 
         # Get every mask
         self.masks = []
@@ -145,7 +141,11 @@ class DataLoader:
         """
         image_embeddings = []
         for i in idxes:
-            path = f'embeddings/{self.mode}/{i}.pt'
+            if self.aug:
+                dir = 'embeddings'
+            else:
+                dir = 'embeddings_noaug'
+            path = f'{dir}/{self.mode}/{i}.pt'
             if os.path.exists(path):
                 image_embeddings.append(torch.load(path))
             else:
@@ -156,10 +156,10 @@ class DataLoader:
                     image = image[None, :, :, :]
                     image = self.sam.image_encoder(self.sam.preprocess(image))
                 image_embeddings.append(image)
-                if not os.path.exists('embeddings'):
-                    os.mkdir('embeddings')
-                if not os.path.exists(f'embeddings/{self.mode}'):
-                    os.mkdir(f'embeddings/{self.mode}')
+                if not os.path.exists(f'{dir}'):
+                    os.mkdir(f'{dir}')
+                if not os.path.exists(f'{dir}/{self.mode}'):
+                    os.mkdir(f'{dir}/{self.mode}')
                 torch.save(image, path)
 
         image_embeddings = torch.cat(image_embeddings, dim=0)
