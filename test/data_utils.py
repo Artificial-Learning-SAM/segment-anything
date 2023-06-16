@@ -12,7 +12,7 @@ from tqdm import tqdm
 from segment_anything.utils.transforms import ResizeLongestSide
 
 class DataLoader:
-    def __init__(self, mode, sam, args, get_cnn=False, aug=True):
+    def __init__(self, mode, sam, args, get_cnn=False, aug=True , single_nii=False):
         print(f'Loading {mode} data...')
         self.mode = mode
         self.sam = sam
@@ -32,6 +32,9 @@ class DataLoader:
         label_list = os.listdir(label_dir)
         image_list.sort()
         label_list.sort()
+        if single_nii:
+            image_list = image_list[:1]
+            label_list = label_list[:1]        
 
         # Split train and val
         if mode == 'train':
@@ -84,6 +87,7 @@ class DataLoader:
                     labels.append(label)
 
         self.slices = slices
+        self.labels = labels
         self.original_size = slices[0].shape[:2]
         self.input_size = (sam.image_encoder.img_size, sam.image_encoder.img_size)
         self.resize = ResizeLongestSide(sam.image_encoder.img_size)
@@ -164,6 +168,19 @@ class DataLoader:
 
         image_embeddings = torch.cat(image_embeddings, dim=0)
         return image_embeddings
+
+    def get_single_image(self):
+        """
+        Get a single image , gt_masks
+
+        Returns:
+        """
+        image = self.slices[self.idx]
+        gt_masks = self.labels[self.idx]
+        self.idx += 5
+        if self.idx == self.len:
+            self.idx = 0
+        return image, gt_masks
 
     def get_batch(self):
         """

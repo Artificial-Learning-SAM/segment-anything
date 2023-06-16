@@ -130,7 +130,6 @@ def do_epoch(epoch, dataloader, mode):
             # input = gt_binary_masks
             input = input.float()
             output = vgg(input)
-
             label_organ = torch.as_tensor(organ, device=args.device) # crossentropyloss的target是从0开始的
             # label_organ = label_organ - 1
             loss = loss_fn(output, label_organ)
