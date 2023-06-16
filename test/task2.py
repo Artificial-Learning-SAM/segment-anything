@@ -13,7 +13,7 @@ from monai.losses import DiceCELoss
 from segment_anything import sam_model_registry, SamPredictor
 from data_utils import DataLoader, GetPointsFromMask, GetBBoxFromMask
 
-parser = argparse.ArgumentParser(description='Task 1')
+parser = argparse.ArgumentParser(description='Task 2')
 parser.add_argument('-p', '--prompt', type=str,
                     help='List of numbers. x>0 means sampling x points from mask. x<0 means sampling |x| points, but using center (max distance to boundary) of mask as the first point. x==0 means using bbox. E.g. "[0, 1, -1, 3]".')
 parser.add_argument('-e', '--epoch', type=int,
@@ -129,9 +129,11 @@ for epoch in range(args.epoch):
     dices.append(epoch_dice)
 
     # Validation
+    sam.eval()
     with torch.no_grad():
         epoch_dice = do_epoch(epoch, dataloader_val, 'val')
     dices_val.append(epoch_dice)
+    sam.train()
 
     # Save model
     torch.save(sam.mask_decoder.state_dict(), f'./model/epoch-{epoch}-val-{epoch_dice:.10f}.pth')
