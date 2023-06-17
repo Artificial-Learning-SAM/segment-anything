@@ -69,6 +69,7 @@ print("VGG initialized")
 #             iou_head_depth=3,
 #             iou_head_hidden_dim=256,
 #         )
+
 # class_decoder.to(device=args.device)
 # state = torch.load("./epoch-6-val-0.68139.pth")
 # class_decoder.load_state_dict(state)
@@ -78,38 +79,39 @@ np.random.seed(0)
 dataloader = DataLoader('test', sam, args)
 mask_generator = SamAutomaticMaskGenerator(sam , pred_iou_thresh=0.5 ,box_nms_thresh= 0.7)
 
-def decoder_classifier(image , anns):
-    image = torch.from_numpy(image) #512*512
-    #transform into 1 * 3 * 512 * 512
-    image = image.unsqueeze(0).repeat(1,3,1,1)
-    #to float
-    image = image.float()
-    img_embedding = sam.image_encoder(sam.preprocess(image.to(device=args.device)))
-    from segment_anything.utils.transforms import ResizeLongestSide
-    resize = ResizeLongestSide(sam.image_encoder.img_size)
-    original_size = image.shape[-2:]
-    for ann in anns:
-        box = ann['bbox']
-        box = np.array(box)
-        box = resize.apply_boxes(box, original_size)
-        box_torch = torch.as_tensor(box, dtype=torch.float, device=args.device)
-        sparse, dense = sam.prompt_encoder(
-            points = None,
-            boxes = torch.stack([box_torch], dim=0),
-            masks = None,
-        )
-        #output device for all tensors
-        _,_,class_logits = class_decoder(
-            image_embeddings=img_embedding,
-            image_pe=sam.prompt_encoder.get_dense_pe(),
-            sparse_prompt_embeddings=sparse,
-            dense_prompt_embeddings=dense,
-            multimask_output=False,
-        )
-        vclass = torch.argmax(class_logits , dim=1).item()
-        ann['organ'] = vclass
-    # assert False
-    return anns
+# def decoder_classifier(image , anns):
+#     image = torch.from_numpy(image) #512*512
+#     #transform into 1 * 3 * 512 * 512
+#     image = image.unsqueeze(0).repeat(1,3,1,1)
+#     #to float
+#     image = image.float()
+#     img_embedding = sam.image_encoder(sam.preprocess(image.to(device=args.device)))
+#     from segment_anything.utils.transforms import ResizeLongestSide
+#     resize = ResizeLongestSide(sam.image_encoder.img_size)
+#     original_size = image.shape[-2:]
+#     for ann in anns:
+#         box = ann['bbox']
+#         box = np.array(box)
+#         box = resize.apply_boxes(box, original_size)
+#         box_torch = torch.as_tensor(box, dtype=torch.float, device=args.device)
+#         sparse, dense = sam.prompt_encoder(
+#             points = None,
+#             boxes = torch.stack([box_torch], dim=0),
+#             masks = None,
+#         )
+#         #output device for all tensors
+#         _,_,class_logits = class_decoder(
+#             image_embeddings=img_embedding,
+#             image_pe=sam.prompt_encoder.get_dense_pe(),
+#             sparse_prompt_embeddings=sparse,
+#             dense_prompt_embeddings=dense,
+#             multimask_output=False,
+#         )
+#         vclass = torch.argmax(class_logits , dim=1).item()
+#         ann['organ'] = vclass
+#     # assert False
+#     return anns
+>>>>>>> cd104df69d60044ed91a524d6bf103d8366397ce
     
 
 def cnn_classifier(image , anns):
