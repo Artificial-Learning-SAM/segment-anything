@@ -175,6 +175,6 @@ for epoch in range(args.epoch):
         f.write(f'loss: {mean(epoch_loss)}\n')
         f.write(f'accurate rate: {mean(epoch_accurate_rate)}\n')
     # Plot loss and dice
-    plot_curve(losses, accurate, accurate_val)
+    # plot_curve(losses, accurate, accurate_val)
 
 

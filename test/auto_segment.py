@@ -77,7 +77,7 @@ print("VGG initialized")
 
 np.random.seed(0)
 dataloader = DataLoader('test', sam, args)
-mask_generator = SamAutomaticMaskGenerator(sam , pred_iou_thresh=0.5 ,box_nms_thresh= 0.7)
+mask_generator = SamAutomaticMaskGenerator(sam , pred_iou_thresh=0.4 ,box_nms_thresh= 0.4)
 
 # def decoder_classifier(image , anns):
 #     image = torch.from_numpy(image) #512*512
@@ -111,8 +111,6 @@ mask_generator = SamAutomaticMaskGenerator(sam , pred_iou_thresh=0.5 ,box_nms_th
 #         ann['organ'] = vclass
 #     # assert False
 #     return anns
->>>>>>> cd104df69d60044ed91a524d6bf103d8366397ce
-    
 
 def cnn_classifier(image , anns):
     image = torch.from_numpy(image) 

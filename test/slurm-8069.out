@@ -1,0 +1,4 @@
+Traceback (most recent call last):
+  File "/ceph/home/liuxingyu/segment-anything/test/task3_decoder.py", line 9, in <module>
+    import matplotlib as mpl
+ModuleNotFoundError: No module named 'matplotlib'
