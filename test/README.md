@@ -1,10 +1,10 @@
 所有代码在本文件夹内。
 
-以下的命令为选择三个点作为prompt，其中第一个是内距离最大点：
+命令示例：
 ```
 cd test
-python task1.py -h
-python task1.py -n 3 -c
+python task1_3d.py --decoder_weight="model/hybrid/epoch-152-val-0.8381975279.pth" -p "[1]"
+python task2.py -p "[0, 1, -1, 3, -3]"
 ```
 
 额外需要的文件（不添加到仓库内）结构：
@@ -33,6 +33,8 @@ segment-anything/
 ## Performance on the test set
 
 以下默认 bbox 有扰动。
+
+以下是 2d Dice：
 
 ```
 count: [151. 168. 168.  51. 132. 285. 181. 371. 330.  81. 126.  60.  72.]
