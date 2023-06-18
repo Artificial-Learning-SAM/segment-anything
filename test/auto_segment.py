@@ -24,10 +24,10 @@ parser.add_argument('--device', type=str,
                     default='cuda')
 parser.add_argument('--decoder_weight', type=str,
                     help='Path to decoder weight',
-                    default="epoch-119-val-0.8411638965.pth")
+                    default="model/hybrid/epoch-152-val-0.8381975279.pth")
 args = parser.parse_args()
 
-args.prompt = eval(args.prompt)
+# args.prompt = eval(args.prompt)
 
 print("Imports done")
 
@@ -48,7 +48,7 @@ from cnn_network import vgg11_bn
 # Init vgg
 vgg = vgg11_bn()
 vgg = vgg.to(device=args.device)
-path_vgg = "./gt_epoch-19-val-0.5212053571.pth"
+path_vgg = "./pred_epoch-28-val-0.9151785714.pth"
 state = torch.load(path_vgg)
 vgg.load_state_dict(state)
 vgg.eval()
@@ -126,8 +126,8 @@ def cnn_classifier(image , anns):
     input = torch.cat((image , masks) , dim=1)
     input = input.float()
     input = input.to(device=args.device)
-    print(input.max())
-    print(input.min())
+    # print(input.max())
+    # print(input.min())
     for i in range(num):
         # print(input[i].unsqueeze(0).shape)
         # print(input[i])
@@ -135,6 +135,8 @@ def cnn_classifier(image , anns):
         # print(output)
         output_class = torch.argmax(output , dim=1)
         anns[i]['organ'] = output_class.item()
+        anns[i]['organ_score'] = torch.softmax(output, dim=1).max().item()
+        # print(torch.softmax(output, dim=1))
     return anns
     
 
@@ -212,17 +214,17 @@ def show_image_masks(image, masks, gt_mask,id):
 def delete_multiple_masks(masks):
     # Create a dictionary to store the masks with the largest area for each organ
     organ_masks = {}
-    # for mask in masks:
-    #     organ = mask['organ']
-    #     area = mask['area']
-    #     if organ == 0:
-    #         continue
-    #     if organ not in organ_masks or area > organ_masks[organ]['area']:
-    #         organ_masks[organ] = mask
+    for mask in masks:
+        organ = mask['organ']
+        score = mask['organ_score']
+        if organ == 0 or score < 0.3:
+            continue
+        if organ not in organ_masks or score > organ_masks[organ]['organ_score']:
+            organ_masks[organ] = mask
     # Convert the dictionary back to a list
-    # return list(organ_masks.values())
-    print('find masks with length',len(masks))
-    return masks
+    return list(organ_masks.values())
+    # print('find masks with length', len(masks))
+    # return masks
 
 
 def calc_dice(pred_mask, gt_mask):
@@ -241,8 +243,9 @@ def calc_all_scores(masks , gt_mask):
 
 vgg.eval()
 with torch.no_grad():
-    for i in range(len(dataloader)):
-        image, gt_mask = dataloader.get_single_image()
+    dices_3d = {}
+    for i in tqdm(range(len(dataloader.slices))):
+        image, gt_mask, nii = dataloader.get_single_image()
         #image : (512,512,3)
         #gt_mask : (512,512)
         pred_masks = mask_generator.generate(image)
@@ -250,12 +253,40 @@ with torch.no_grad():
         # print(pred_masks[0].keys())
         count_masks = len(pred_masks)
         image = image[:,:,0]
-        pred_masks = cnn_classifier(image , pred_masks)
+        pred_masks = cnn_classifier(image, pred_masks)
         # pred_masks = decoder_classifier(image , pred_masks)
         pred_masks = delete_multiple_masks(pred_masks)
-        show_image_masks(image , pred_masks,gt_mask ,i)
+        # show_image_masks(image, pred_masks, gt_mask, i)
         #the number of non-zero element in gt_mask , multipky count only once
         #gt_mask: (512,512)
         #gt_masks: (num_gt,512,512)
         #gt_masks
         # show_masks_with_class(image , pred_masks , pred_organ_label)
+        for mask in pred_masks:
+            organ = mask['organ']
+            if (nii, organ) not in dices_3d:
+                dices_3d[(nii, organ)] = np.zeros(2)
+            pred = mask['segmentation']
+            # print(pred.shape, pred.dtype, pred.max())
+            gt = gt_mask == organ
+            intersection = pred * gt
+            dices_3d[(nii, organ)][0] += 2 * intersection.sum()
+            dices_3d[(nii, organ)][1] += pred.sum()
+
+        for organ in range(1, 14):
+            if (nii, organ) not in dices_3d:
+                dices_3d[(nii, organ)] = np.zeros(2)
+            dices_3d[(nii, organ)][1] += (gt_mask == organ).sum()
+
+    dices = np.zeros((6, 13))
+    cnt = np.zeros(13)
+    for k, v in dices_3d.items():
+        if v[1] == 0:
+            continue
+        nii, organ = k
+        dices[nii, organ - 1] += v[0] / v[1]
+        cnt[organ - 1] += 1
+    np.set_printoptions(precision=3, suppress=True)
+    print(dices)
+    print(dices.sum(0) / (cnt + (cnt == 0)))
+    print((dices.sum(0) / (cnt + (cnt == 0))).sum() / (cnt > 0).sum())

@@ -18,6 +18,7 @@ class DataLoader:
         self.sam = sam
         self.args = args
         self.idx = 0
+        self.img_idx = 0
         self.get_cnn = get_cnn
         self.aug = aug
 
@@ -62,6 +63,7 @@ class DataLoader:
         # Get every slice
         slices = []
         labels = []
+        self.slice_to_nii = []
         
         for i in range(len(image_list)):
             assert image_list[i][-11:] == label_list[i][-11:]
@@ -89,9 +91,11 @@ class DataLoader:
                 if mode == 'train' and self.aug:
                     slices += self.augment(image)
                     labels += self.augment(label)
+                    self.slice_to_nii += [i] * 8
                 else:
                     slices.append(image)
                     labels.append(label)
+                    self.slice_to_nii.append(i)
 
         self.slices = slices
         self.labels = labels
@@ -102,11 +106,12 @@ class DataLoader:
 
         # Get every mask
         self.masks = []
-        self.masks_idx = []
+        self.mask_to_slice = []
         self.organ = []
         for i in range(len(labels)):
-            # Add background
+
             if self.get_cnn:
+                # Add background as a class
                 lb = 0
             else:
                 lb = 1
@@ -115,10 +120,13 @@ class DataLoader:
                 mask = (labels[i] == j).astype(np.uint8)
                 if mask.max() > 0:
                     self.masks.append(mask)
-                    self.masks_idx.append(i)
+                    self.mask_to_slice.append(i)
                     self.organ.append(j)
         self.len = len(self.masks)
-        self.len = self.len // args.batch_size * args.batch_size
+
+        # Align to batch size in training mode
+        if mode == 'train':
+            self.len = self.len // args.batch_size * args.batch_size
 
         print(f'Loaded {mode} data.')
         print(psutil.Process(os.getpid()).memory_info().rss / 1024 ** 3, 'GB')
@@ -158,7 +166,7 @@ class DataLoader:
                 dir = 'embeddings_noaug'
             path = f'{dir}/{self.mode}/{i}.pt'
             if os.path.exists(path):
-                image_embeddings.append(torch.load(path))
+                image_embeddings.append(torch.load(path, map_location=self.args.device))
             else:
                 with torch.no_grad():
                     image = self.resize.apply_image(self.slices[i])
@@ -178,16 +186,15 @@ class DataLoader:
 
     def get_single_image(self):
         """
-        Get a single image , gt_masks
-
-        Returns:
+        Get a single image and its label. Independent of get_batch method.
         """
-        image = self.slices[self.idx]
-        gt_masks = self.labels[self.idx]
-        self.idx += 5
-        if self.idx == self.len:
-            self.idx = 0
-        return image, gt_masks
+        image = self.slices[self.img_idx]
+        label = self.labels[self.img_idx]
+        nii   = self.slice_to_nii[self.img_idx]
+        self.img_idx += 1
+        if self.img_idx == len(self.slices):
+            self.img_idx = 0
+        return image, label, nii
 
     def get_batch(self):
         """
@@ -195,18 +202,20 @@ class DataLoader:
 
         Returns:
         """
+        bs = min(self.args.batch_size, self.len - self.idx)
         image_embeddings = self.get_image_embeddings(
-            self.masks_idx[self.idx : self.idx + self.args.batch_size]
+            self.mask_to_slice[self.idx : self.idx + bs]
         )
-        i = self.masks_idx[self.idx : self.idx + self.args.batch_size]
-        masks = self.masks[self.idx : self.idx + self.args.batch_size]
-        organ = self.organ[self.idx : self.idx + self.args.batch_size]
+        masks = self.masks[self.idx : self.idx + bs]
+        organ = self.organ[self.idx : self.idx + bs]
+        mask_to_nii = [self.slice_to_nii[_]
+                       for _ in self.mask_to_slice[self.idx : self.idx + bs]]
 
         if self.get_cnn:
             img = np.array([self.slices[_][:,:,0] / 255 for _ in i])
             img = torch.as_tensor(img, device=self.args.device)
 
-        self.idx += self.args.batch_size
+        self.idx += bs
         if self.idx == self.len:
             self.idx = 0
 
@@ -271,13 +280,20 @@ class DataLoader:
         masks = torch.as_tensor(masks, dtype=torch.float, device=self.args.device)
         if self.get_cnn:
             return image_embeddings, sparse_embeddings, dense_embeddings, masks, organ, img
-        return image_embeddings, sparse_embeddings, dense_embeddings, masks, organ
+        if self.mode == 'train':
+            return image_embeddings, sparse_embeddings, dense_embeddings, masks, organ
+        
+        # If in val or test mode, return the mask_to_nii to calculate the 3d Dice
+        return image_embeddings, sparse_embeddings, dense_embeddings, masks, organ, mask_to_nii
 
     def __len__(self):
         """
         Get number of batches in dataset.
         """
-        return self.len // self.args.batch_size
+        if self.mode == 'train':
+            return self.len // self.args.batch_size
+        else:
+            return (self.len + self.args.batch_size - 1) // self.args.batch_size
 
 
 def GetPointsFromMask(mask, number, include_center):
